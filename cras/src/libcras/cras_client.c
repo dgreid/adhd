@@ -876,7 +876,7 @@ static int client_thread_rm_stream(struct cras_client *client,
 
 	/* Tell server to remove. */
 	cras_fill_disconnect_stream_message(&msg, stream_id);
-	rc = write(client->server_fd, &msg, sizeof(msg));
+	rc = client_server_comms_write_message(client->comms, &msg.header);
 	if (rc < 0)
 		syslog(LOG_ERR, "error removing stream from server\n");
 
@@ -1018,7 +1018,7 @@ static void handle_stream_reattach(cras_stream_id_t stream_id, void *data)
 				  stream->config->min_cb_level,
 				  stream->flags,
 				  stream->config->format);
-	rc = write(client->server_fd, &serv_msg, sizeof(serv_msg));
+	rc = client_server_comms_write_message(client->comms, &msg.header);
 	if (rc != sizeof(serv_msg))
 		client_thread_rm_stream(client, stream_id);
 }
@@ -1406,28 +1406,6 @@ static int send_stream_volume_command_msg(struct cras_client *client,
 	return send_command_message(client, &msg.header);
 }
 
-/* Sends a message back to the client and returns the error code. */
-static int write_message_to_server(struct cras_client *client,
-				   const struct cras_server_message *msg)
-{
-	if (write(client->server_fd, msg, msg->length) != msg->length) {
-		int rc = 0;
-
-		/* Write to server failed, try to re-connect. */
-		syslog(LOG_DEBUG, "Server write failed, re-attach.");
-		if (client->thread.running)
-			rc = send_simple_cmd_msg(client, 0,
-						 CLIENT_SERVER_CONNECT);
-		else
-			rc = connect_to_server_wait(client);
-		if (rc < 0)
-			return rc;
-		if (write(client->server_fd, msg, msg->length) != msg->length)
-			return -EINVAL;
-	}
-	return 0;
-}
-
 static int get_device_list(struct cras_client *client,
 			   struct cras_iodev_info *devs,
 			   size_t max_devs,
@@ -1647,7 +1625,8 @@ int cras_client_switch_iodev(struct cras_client *client,
 		return -EINVAL;
 
 	fill_cras_switch_stream_type_iodev(&serv_msg, stream_type, iodev);
-	return write_message_to_server(client, &serv_msg.header);
+	return client_server_comms_write_message(client->comms,
+						 &serv_msg.header);
 }
 
 int cras_client_set_system_volume(struct cras_client *client, size_t volume)
@@ -1658,7 +1637,7 @@ int cras_client_set_system_volume(struct cras_client *client, size_t volume)
 		return -EINVAL;
 
 	cras_fill_set_system_volume(&msg, volume);
-	return write_message_to_server(client, &msg.header);
+	return client_server_comms_write_message(client->comms, &msg.header);
 }
 
 int cras_client_set_system_capture_gain(struct cras_client *client, long gain)
@@ -1669,7 +1648,7 @@ int cras_client_set_system_capture_gain(struct cras_client *client, long gain)
 		return -EINVAL;
 
 	cras_fill_set_system_capture_gain(&msg, gain);
-	return write_message_to_server(client, &msg.header);
+	return client_server_comms_write_message(client->comms, &msg.header);
 }
 
 int cras_client_set_system_mute(struct cras_client *client, int mute)
@@ -1680,7 +1659,7 @@ int cras_client_set_system_mute(struct cras_client *client, int mute)
 		return -EINVAL;
 
 	cras_fill_set_system_mute(&msg, mute);
-	return write_message_to_server(client, &msg.header);
+	return client_server_comms_write_message(client->comms, &msg.header);
 }
 
 int cras_client_set_system_capture_mute(struct cras_client *client, int mute)
@@ -1691,7 +1670,7 @@ int cras_client_set_system_capture_mute(struct cras_client *client, int mute)
 		return -EINVAL;
 
 	cras_fill_set_system_capture_mute(&msg, mute);
-	return write_message_to_server(client, &msg.header);
+	return client_server_comms_write_message(client->comms, &msg.header);
 }
 
 size_t cras_client_get_system_volume(struct cras_client *client)
