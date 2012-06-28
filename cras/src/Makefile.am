@@ -50,7 +50,8 @@ check_PROGRAMS = iodev_list_unittest rstream_unittest \
 	fmt_conv_unittest shm_unittest mix_unittest alsa_io_unittest \
 	rclient_unittest system_state_unittest volume_curve_unittest \
 	alsa_card_unittest alsa_mixer_unittest iodev_unittest \
-	alsa_jack_unittest card_config_unittest
+	alsa_jack_unittest card_config_unittest \
+	server_message_handler_unittest
 TESTS = $(check_PROGRAMS)
 
 cras_test_client_SOURCES = tests/cras_test_client.c
@@ -140,3 +141,10 @@ alsa_jack_unittest_SOURCES = tests/alsa_jack_unittest.cc \
 alsa_jack_unittest_CPPFLAGS = $(COMMON_CPPFLAGS) -I$(top_builddir)/src/common \
 	-I$(top_builddir)/src/server
 alsa_jack_unittest_LDADD = -lgtest
+
+server_message_handler_unittest_SOURCES = \
+	tests/server_message_handler_unittest.cc \
+	libcras/server_message_handler.c
+server_message_handler_unittest_CPPFLAGS = $(COMMON_CPPFLAGS) \
+	-I$(top_builddir)/src/common -I$(top_builddir)/src/libcras
+server_message_handler_unittest_LDADD = -lgtest
