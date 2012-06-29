@@ -43,6 +43,7 @@
 #include "cras_shm.h"
 #include "cras_types.h"
 #include "cras_util.h"
+#include "server_message_handler.h"
 #include "utlist.h"
 
 static const size_t MAX_CMD_MSG_LEN = 256;
@@ -194,6 +195,7 @@ struct client_stream {
  * system_max_volume - In dBFS * 100, maximum system volume.
  * system_min_capture_gain - In dBFS * 100, minimum system capture gain.
  * system_max_capture_gain - In dBFS * 100, maximum system capture gain.
+ * server_message_handler - Parses messages from the server.
  */
 struct cras_client {
 	int id;
@@ -220,6 +222,7 @@ struct cras_client {
 	long system_max_volume;
 	long system_min_capture_gain;
 	long system_max_capture_gain;
+	struct server_message_handler *server_message_handler;
 };
 
 /*
@@ -696,14 +699,25 @@ static int config_format_converter(struct client_stream *stream,
 /* Handles the stream connected message from the server.  Check if we need a
  * format converter, configure the shared memory region, and start the audio
  * thread that will handle requests from the server. */
-static int stream_connected(struct client_stream *stream,
-			    const struct cras_client_stream_connected *msg)
+static void handle_stream_connected(
+		const struct cras_client_stream_connected *msg,
+		void *data)
 {
 	int rc;
+	struct cras_client *client = (struct cras_client *)data;
+	struct client_stream *stream = NULL;
+
+	if (client == NULL)
+		return;
+
+	stream = stream_from_id(client, msg->stream_id);
+	if (stream == NULL)
+		return;
 
 	if (msg->err) {
 		syslog(LOG_ERR, "Error Setting up stream %d\n", msg->err);
-		return msg->err;
+		rc = msg->err;
+		goto err_ret;
 	}
 
 	rc = config_shm(stream, msg->shm_key, msg->shm_max_size);
@@ -715,7 +729,7 @@ static int stream_connected(struct client_stream *stream,
 	rc = config_format_converter(stream, &msg->format);
 	if (rc < 0) {
 		syslog(LOG_ERR, "Error setting up format conversion");
-		return rc;
+		goto err_ret;
 	}
 
 	cras_shm_set_volume_scaler(stream->shm, stream->volume_scaler);
@@ -734,15 +748,23 @@ static int stream_connected(struct client_stream *stream,
 		goto err_ret;
 	}
 
-	return 0;
+	return;
 err_ret:
+	if (stream == NULL)
+		return;
+
 	if (stream->wake_fds[0] >= 0) {
 		close(stream->wake_fds[0]);
 		close(stream->wake_fds[1]);
 	}
+
 	if (stream->shm)
 		shmdt(stream->shm);
-	return rc;
+
+	stream->config->err_cb(stream->client,
+			       stream->id,
+			       rc,
+			       stream->config->user_data);
 }
 
 /* Adds a stream to a running client.  Checks to make sure that the client is
@@ -953,15 +975,19 @@ static int client_thread_attached_client_device_list(
 /* Re-attaches a stream that was removed on the server side so that it could be
  * moved to a new device. To achieve this, remove the stream and send the
  * connect message again. */
-static int handle_stream_reattach(struct cras_client *client,
-				  cras_stream_id_t stream_id)
+static void handle_stream_reattach(cras_stream_id_t stream_id, void *data)
 {
-	struct cras_connect_message serv_msg;
-	struct client_stream *stream = stream_from_id(client, stream_id);
 	int rc;
+	struct cras_connect_message serv_msg;
+	struct client_stream *stream;
+	struct cras_client *client = (struct cras_client *)data;
 
+	if (client == NULL)
+		return;
+
+	stream = stream_from_id(client, stream_id);
 	if (stream == NULL)
-		return 0;
+		return;
 
 	/* Shut down locally. Stream has been removed on the server side. */
 	if (stream->thread.running) {
@@ -993,18 +1019,19 @@ static int handle_stream_reattach(struct cras_client *client,
 				  stream->flags,
 				  stream->config->format);
 	rc = write(client->server_fd, &serv_msg, sizeof(serv_msg));
-	if (rc != sizeof(serv_msg)) {
+	if (rc != sizeof(serv_msg))
 		client_thread_rm_stream(client, stream_id);
-		return -EIO;
-	}
-
-	return 0;
 }
 
 /* Handles a new list of iodevs. */
-static int handle_new_iodev_list(struct cras_client *client,
-				 struct cras_client_iodev_list *msg)
+static void handle_new_iodev_list(struct cras_client_iodev_list *msg,
+				  void *data)
 {
+	struct cras_client *client = (struct cras_client *)data;
+
+	if (client == NULL)
+		return;
+
 	free(client->input_devs);
 	client->input_devs = NULL;
 	free(client->output_devs);
@@ -1016,7 +1043,7 @@ static int handle_new_iodev_list(struct cras_client *client,
 				client->num_output_devs;
 		client->output_devs = malloc(output_size);
 		if (client->output_devs == NULL)
-			return -ENOMEM;
+			return;
 		memcpy(client->output_devs, &msg->iodevs[0], output_size);
 	}
 	client->num_input_devs = msg->num_inputs;
@@ -1026,20 +1053,24 @@ static int handle_new_iodev_list(struct cras_client *client,
 		client->input_devs = malloc(input_size);
 		if (client->input_devs == NULL) {
 			free(client->output_devs);
-			return -ENOMEM;
+			return;
 		}
 		memcpy(client->input_devs,
 		       &msg->iodevs[client->num_output_devs],
 		       input_size);
 	}
-	return 0;
 }
 
 /* Handles a new list of attached clients. */
-static int handle_new_attached_clients_list(
-		struct cras_client *client,
-		struct cras_client_client_list *msg)
+static void handle_new_attached_clients_list(
+		struct cras_client_client_list *msg,
+		void *data)
 {
+	struct cras_client *client = (struct cras_client *)data;
+
+	if (client == NULL)
+		return;
+
 	free(client->attached_clients);
 	client->attached_clients = NULL;
 
@@ -1049,16 +1080,19 @@ static int handle_new_attached_clients_list(
 				client->num_attached_clients;
 		client->attached_clients = malloc(size);
 		if (client->attached_clients == NULL)
-			return -ENOMEM;
+			return;
 		memcpy(client->attached_clients, &msg->client_info[0], size);
 	}
-	return 0;
 }
 
 /* Handles new volume state. */
-static int handle_system_volume(struct cras_client *client,
-				struct cras_client_volume_status *msg)
+static void handle_system_volume(struct cras_client_volume_status *msg,
+				 void *data)
 {
+	struct cras_client *client = (struct cras_client *)data;
+
+	if (client == NULL)
+		return;
 	client->system_volume = msg->volume;
 	client->system_muted = !!msg->muted;
 	client->system_capture_gain = msg->capture_gain;
@@ -1067,8 +1101,18 @@ static int handle_system_volume(struct cras_client *client,
 	client->system_max_volume = msg->volume_max_dBFS;
 	client->system_min_capture_gain = msg->capture_gain_min_dBFS;
 	client->system_max_capture_gain = msg->capture_gain_max_dBFS;
-	return 0;
 }
+
+/* Handle the client connected message from the server. */
+void connected_callback(size_t client_id, void *data)
+{
+	struct cras_client *client = (struct cras_client *)data;
+
+	if (client == NULL)
+		return;
+	client->id = client_id;
+}
+
 
 /* Handles messages from the cras server. */
 static int handle_message_from_server(struct cras_client *client)
@@ -1093,56 +1137,8 @@ static int handle_message_from_server(struct cras_client *client)
 	if (nread <= 0)
 		goto read_error;
 
-	switch (msg->id) {
-	case CRAS_CLIENT_CONNECTED: {
-		struct cras_client_connected *cmsg =
-			(struct cras_client_connected *)msg;
-		client->id = cmsg->client_id;
-		break;
-	}
-	case CRAS_CLIENT_STREAM_CONNECTED: {
-		struct cras_client_stream_connected *cmsg =
-			(struct cras_client_stream_connected *)msg;
-		struct client_stream *stream =
-			stream_from_id(client, cmsg->stream_id);
-		if (stream == NULL)
-			break;
-		rc = stream_connected(stream, cmsg);
-		if (rc < 0)
-			stream->config->err_cb(stream->client,
-					       stream->id,
-					       rc,
-					       stream->config->user_data);
-		break;
-	}
-	case CRAS_CLIENT_STREAM_REATTACH: {
-		struct cras_client_stream_reattach *cmsg =
-			(struct cras_client_stream_reattach *)msg;
-		handle_stream_reattach(client, cmsg->stream_id);
-		break;
-	}
-	case CRAS_CLIENT_IODEV_LIST: {
-		struct cras_client_iodev_list *cmsg =
-			(struct cras_client_iodev_list *)msg;
-		handle_new_iodev_list(client, cmsg);
-		break;
-	}
-	case CRAS_CLIENT_VOLUME_UPDATE: {
-		struct cras_client_volume_status *vmsg =
-			(struct cras_client_volume_status *)msg;
-		handle_system_volume(client, vmsg);
-		break;
-	}
-	case CRAS_CLIENT_CLIENT_LIST_UPDATE:{
-		struct cras_client_client_list *cmsg =
-			(struct cras_client_client_list *)msg;
-		handle_new_attached_clients_list(client, cmsg);
-		break;
-	}
-	default:
-		syslog(LOG_ERR, "Receive unknown command %d", msg->id);
-		break;
-	}
+	server_message_handler_handle_message(client->server_message_handler,
+					      msg);
 
 	free(buf);
 	return 0;
@@ -1455,12 +1451,28 @@ static int get_device_list(struct cras_client *client,
 int cras_client_create(struct cras_client **client)
 {
 	int rc;
+	static const struct server_event_callbacks event_callbacks = {
+		.stream_connected = handle_stream_connected,
+		.stream_reattach = handle_stream_reattach,
+		.new_iodev_list = handle_new_iodev_list,
+		.new_attached_clients_list = handle_new_attached_clients_list,
+		.system_volume = handle_system_volume,
+	};
 
 	*client = calloc(1, sizeof(struct cras_client));
 	if (*client == NULL)
 		return -ENOMEM;
 	(*client)->server_fd = -1;
 	(*client)->id = -1;
+
+	(*client)->server_message_handler = server_message_handler_create(
+			&event_callbacks,
+			connected_callback,
+			*client);
+	if ((*client)->server_message_handler == NULL) {
+		rc = -ENOMEM;
+		goto free_error;
+	}
 
 	/* Pipes used by the main thread and the client thread to send commands
 	 * and replies. */
@@ -1500,6 +1512,7 @@ void cras_client_destroy(struct cras_client *client)
 	free(client->output_devs);
 	free(client->input_devs);
 	free(client->attached_clients);
+	server_message_handler_destroy(client->server_message_handler);
 	free(client);
 }
 
