@@ -287,64 +287,6 @@ int thread_add_stream(struct audio_thread *thread,
 	return 0;
 }
 
-static void apply_dsp_pipeline(struct pipeline *pipeline, size_t channels,
-			       uint8_t *buf, size_t frames)
-{
-	size_t chunk;
-	size_t i, j;
-	int16_t *target, *target_ptr;
-	float *source[channels], *sink[channels];
-	float *source_ptr[channels], *sink_ptr[channels];
-
-	if (!pipeline || frames == 0)
-		return;
-
-	target = (int16_t *)buf;
-
-	/* get pointers to source and sink buffers */
-	for (i = 0; i < channels; i++) {
-		source[i] = cras_dsp_pipeline_get_source_buffer(pipeline, i);
-		sink[i] = cras_dsp_pipeline_get_sink_buffer(pipeline, i);
-	}
-
-	/* process at most DSP_BUFFER_SIZE frames each loop */
-	while (frames > 0) {
-		chunk = min(frames, (size_t)DSP_BUFFER_SIZE);
-
-		/* deinterleave and convert to float */
-		target_ptr = target;
-		for (i = 0; i < channels; i++)
-			source_ptr[i] = source[i];
-		for (i = 0; i < chunk; i++) {
-			for (j = 0; j < channels; j++)
-				*(source_ptr[j]++) = *target_ptr++ / 32768.0f;
-		}
-
-		cras_dsp_pipeline_run(pipeline, chunk);
-
-		/* interleave and convert back to int16_t */
-		target_ptr = target;
-		for (i = 0; i < channels; i++)
-			sink_ptr[i] = sink[i];
-		for (i = 0; i < chunk; i++) {
-			for (j = 0; j < channels; j++) {
-				float f = *(sink_ptr[j]++) * 32768.0f;
-				int16_t i16;
-				if (f > 32767)
-					i16 = 32767;
-				else if (f < -32768)
-					i16 = -32768;
-				else
-					i16 = (int16_t) (f + 0.5f);
-				*target_ptr++ = i16;
-			}
-		}
-
-		target += chunk * channels;
-		frames -= chunk;
-	}
-}
-
 static void apply_dsp(struct cras_iodev *iodev, uint8_t *buf, size_t frames)
 {
 	struct cras_dsp_context *ctx;
@@ -358,8 +300,10 @@ static void apply_dsp(struct cras_iodev *iodev, uint8_t *buf, size_t frames)
 	if (!pipeline)
 		return;
 
-	apply_dsp_pipeline(pipeline, iodev->format->num_channels, buf,
-			   frames);
+	cras_dsp_pipeline_apply(pipeline,
+				iodev->format->num_channels,
+				buf,
+				frames);
 
 	cras_dsp_put_pipeline(ctx);
 }
