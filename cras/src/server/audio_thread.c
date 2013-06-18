@@ -708,7 +708,7 @@ int possibly_fill_audio(struct audio_thread *thread,
 	delay += get_dsp_delay(odev);
 
 	/* Request data from streams that need more */
-	if (idev)
+	if (idev && idev->is_open(idev))
 		/* If unified, get same number of frames that were read. */
 		fr_to_req = captured_frames;
 	else
@@ -934,8 +934,11 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 	cap_sleep_frames = master_dev->buffer_size;
 
 	rc = master_dev->frames_queued(master_dev);
-	if (rc < 0)
+	if (rc < 0) {
+		if (master_dev->is_open(master_dev))
+			master_dev->close_dev(master_dev);
 		return rc;
+	}
 	hw_level = adjust_level(thread, rc);
 
 	if (!wake_threshold_met(master_dev, hw_level)) {
@@ -943,7 +946,7 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 		rc = master_dev->dev_running(master_dev);
 		if (rc < 0)
 			return rc;
-		if (!idev) {
+		if (!idev || !idev->is_open(idev)) {
 			/* Increase sleep correction if waking up too early. */
 			thread->sleep_correction_frames++;
 			pb_sleep_frames = hw_level - odev->cb_threshold +
@@ -960,7 +963,8 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 	rc = possibly_read_audio(thread, delay, hw_level, &cap_sleep_frames);
 	if (rc < 0) {
 		syslog(LOG_ERR, "read audio failed from audio thread");
-		idev->close_dev(idev);
+		if (idev && idev->is_open(idev))
+			idev->close_dev(idev);
 		return rc;
 	}
 	captured_frames = rc;
@@ -973,7 +977,7 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 	if (rc < 0)
 		return rc;
 
-	if (odev && idev && rc == 0) {
+	if (odev && idev && idev->is_open(idev) && rc == 0) {
 		/* No samples.  Give some buffer for the output for unified IO,
 		 * need time to read samples and fill playback buffer before
 		 * hitting underflow.
@@ -982,7 +986,7 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 		rc += odev->cb_threshold;
 	}
 
-	if (!idev) {
+	if (!idev || !idev->is_open(idev)) {
 		rc = adjust_level(thread, rc);
 		hw_level = rc;
 	}
@@ -1001,7 +1005,7 @@ not_enough:
 
 	 /* idev could have been closed for error. */
 	idev = thread->input_dev;
-	if (idev)
+	if (idev && idev->is_open(idev))
 		to_sleep = cap_sleep_frames;
 	else
 		to_sleep = pb_sleep_frames;
@@ -1137,7 +1141,7 @@ int audio_thread_rm_stream(struct audio_thread *thread,
 	return audio_thread_post_message(thread, &msg.header);
 }
 
-struct audio_thread *audio_thread_create(struct cras_iodev *iodev)
+struct audio_thread *audio_thread_create()
 {
 	int rc;
 	struct audio_thread *thread;
@@ -1150,12 +1154,6 @@ struct audio_thread *audio_thread_create(struct cras_iodev *iodev)
 	thread->to_thread_fds[1] = -1;
 	thread->to_main_fds[0] = -1;
 	thread->to_main_fds[1] = -1;
-
-	if (iodev->direction == CRAS_STREAM_INPUT) {
-		thread->input_dev = iodev;
-	} else {
-		thread->output_dev = iodev;
-	}
 
 	/* Two way pipes for communication with the device's audio thread. */
 	rc = pipe(thread->to_thread_fds);
@@ -1171,16 +1169,21 @@ struct audio_thread *audio_thread_create(struct cras_iodev *iodev)
 		return NULL;
 	}
 
-	iodev->thread = thread;
-
 	return thread;
 }
 
-void audio_thread_add_output_dev(struct audio_thread *thread,
+void audio_thread_set_output_dev(struct audio_thread *thread,
 				 struct cras_iodev *odev)
 {
 	thread->output_dev = odev;
 	odev->thread = thread;
+}
+
+void audio_thread_set_input_dev(struct audio_thread *thread,
+				struct cras_iodev *idev)
+{
+	thread->input_dev = idev;
+	idev->thread = thread;
 }
 
 int audio_thread_start(struct audio_thread *thread)
@@ -1198,12 +1201,16 @@ int audio_thread_start(struct audio_thread *thread)
 	return 0;
 }
 
+void audio_thread_remove_streams(struct audio_thread *thread)
+{
+	if (thread->started)
+		audio_thread_rm_all_streams(thread);
+}
+
 void audio_thread_destroy(struct audio_thread *thread)
 {
 	if (thread->started) {
 		struct audio_thread_msg msg;
-
-		audio_thread_rm_all_streams(thread);
 
 		msg.id = AUDIO_THREAD_STOP;
 		msg.length = sizeof(msg);
