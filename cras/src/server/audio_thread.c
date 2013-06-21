@@ -935,7 +935,7 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 	struct cras_iodev *odev = thread->output_dev;
 	struct cras_iodev *master_dev;
 	int rc, delay;
-	unsigned int hw_level, to_sleep;
+	unsigned int hw_level;
 	unsigned int cap_sleep_frames, pb_sleep_frames;
 	unsigned int captured_frames;
 
@@ -944,6 +944,7 @@ int unified_io(struct audio_thread *thread, struct timespec *ts)
 
 	master_dev = (idev && idev->is_open(idev)) ? idev : odev;
 	cap_sleep_frames = master_dev->buffer_size;
+	pb_sleep_frames = master_dev->buffer_size;
 
 	rc = master_dev->frames_queued(master_dev);
 	if (rc < 0) {
@@ -1017,14 +1018,16 @@ not_enough:
 
 	 /* idev could have been closed for error. */
 	idev = thread->input_dev;
-	if (idev && idev->is_open(idev))
-		to_sleep = cap_sleep_frames;
-	else
-		to_sleep = pb_sleep_frames;
+	if (idev && idev->is_open(idev)) {
+		cras_iodev_fill_time_from_frames(cap_sleep_frames,
+						 idev->format->frame_rate,
+						 ts);
+	} else if (odev && odev->is_open(odev)) {
+		cras_iodev_fill_time_from_frames(pb_sleep_frames,
+						 odev->format->frame_rate,
+						 ts);
+	}
 
-	cras_iodev_fill_time_from_frames(to_sleep,
-					 master_dev->format->frame_rate,
-					 ts);
 
 	return 0;
 }
