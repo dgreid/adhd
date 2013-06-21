@@ -132,9 +132,9 @@ static int active_streams(const struct audio_thread *thread,
 	DL_FOREACH(thread->streams, curr) {
 		enum CRAS_STREAM_DIRECTION dir = curr->stream->direction;
 
-		if (cras_stream_has_input(dir))
+		if (cras_stream_uses_input_hw(dir))
 			*in_active = *in_active + 1;
-		if (cras_stream_has_output(dir))
+		if (cras_stream_uses_output_hw(dir))
 			*out_active = *out_active + 1;
 	}
 
@@ -268,7 +268,7 @@ int thread_add_stream(struct audio_thread *thread,
 		return AUDIO_THREAD_ERROR_OTHER;
 
 	/* If not already, open the device(s). */
-	if (stream_has_output(stream) && !odev->is_open(odev)) {
+	if (stream_uses_output(stream) && !odev->is_open(odev)) {
 		thread->sleep_correction_frames = 0;
 		rc = init_device(odev, stream);
 		if (rc < 0) {
@@ -277,7 +277,7 @@ int thread_add_stream(struct audio_thread *thread,
 			return AUDIO_THREAD_OUTPUT_DEV_ERROR;
 		}
 	}
-	if (stream_has_input(stream) && !idev->is_open(idev)) {
+	if (stream_uses_input(stream) && !idev->is_open(idev)) {
 		thread->sleep_correction_frames = 0;
 		rc = init_device(idev, stream);
 		if (rc < 0) {
@@ -388,7 +388,7 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 		struct cras_audio_shm *shm =
 			cras_rstream_output_shm(curr->stream);
 
-		if (!cras_stream_has_output(curr->stream->direction))
+		if (!cras_stream_uses_output_hw(curr->stream->direction))
 			continue;
 
 		if (cras_shm_callback_pending(shm))
@@ -475,7 +475,7 @@ static int write_streams(struct audio_thread *thread,
 	DL_FOREACH(thread->streams, curr) {
 		struct cras_audio_shm *shm;
 
-		if (!cras_stream_has_output(curr->stream->direction))
+		if (!cras_stream_uses_output_hw(curr->stream->direction))
 			continue;
 
 		shm = cras_rstream_output_shm(curr->stream);
@@ -506,7 +506,7 @@ static int write_streams(struct audio_thread *thread,
 			DL_FOREACH(thread->streams, curr) {
 				struct cras_audio_shm *shm;
 
-				if (!cras_stream_has_output(
+				if (!cras_stream_uses_output_hw(
 						curr->stream->direction))
 					continue;
 
@@ -521,7 +521,8 @@ static int write_streams(struct audio_thread *thread,
 		DL_FOREACH_SAFE(thread->streams, curr, tmp) {
 			struct cras_audio_shm *shm;
 
-			if (!cras_stream_has_output(curr->stream->direction))
+			if (!cras_stream_uses_output_hw(
+					curr->stream->direction))
 				continue;
 
 			if (!FD_ISSET(curr->fd, &this_set))
@@ -599,7 +600,7 @@ static void read_streams(struct audio_thread *thread,
 	DL_FOREACH(thread->streams, stream) {
 		struct cras_rstream *rstream = stream->stream;
 
-		if (!cras_stream_has_input(rstream->direction))
+		if (!cras_stream_uses_input_hw(rstream->direction))
 			continue;
 
 		shm = cras_rstream_input_shm(rstream);
@@ -793,7 +794,7 @@ int possibly_read_audio(struct audio_thread *thread,
 
 		rstream = stream->stream;
 
-		if (!cras_stream_has_input(rstream->direction))
+		if (!cras_stream_uses_input_hw(rstream->direction))
 			continue;
 
 		shm = cras_rstream_input_shm(rstream);
@@ -837,7 +838,7 @@ int possibly_read_audio(struct audio_thread *thread,
 
 		rstream = stream->stream;
 
-		if (!cras_stream_has_input(rstream->direction))
+		if (!cras_stream_uses_input_hw(rstream->direction))
 			continue;
 
 		shm = cras_rstream_input_shm(rstream);
