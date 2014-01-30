@@ -21,7 +21,7 @@
 #include "utlist.h"
 
 #define MIN_PROCESS_TIME_US 500 /* 0.5ms - min amount of time to mix/src. */
-#define SLEEP_FUZZ_FRAMES 10 /* # to consider "close enough" to sleep frames. */
+#define SLEEP_FUZZ_FRAMES 48 /* # to consider "close enough" to sleep frames. */
 #define MIN_READ_WAIT_US 2000 /* 2ms */
 
 /* For capture, the amount of frames that will be left after a read is
