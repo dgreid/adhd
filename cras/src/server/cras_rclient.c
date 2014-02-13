@@ -215,6 +215,58 @@ static int handle_switch_stream_type_iodev(
 	return cras_iodev_move_stream_type(msg->stream_type, msg->iodev_idx);
 }
 
+/* Handles dumping audio thread debug info back to the client. */
+static void dump_audio_thread_info(struct cras_rclient *client)
+{
+	struct cras_client_audio_debug_info *msg;
+	struct audio_thread_event_log *log;
+	struct cras_client_audio_log_chunk *log_msg;
+	int read_pos;
+	int i, chunk_idx;
+
+	msg = malloc(sizeof(*msg));
+	log = malloc(sizeof(*log));
+	if (!msg || !log)
+		return;
+
+	cras_fill_client_audio_debug_info(msg);
+	audio_thread_dump_thread_info(cras_iodev_list_get_audio_thread(),
+				      &msg->info, log);
+	cras_rclient_send_message(client, &msg->header);
+	free(msg);
+
+	log_msg = malloc(sizeof(*log_msg));
+	if (!log_msg)
+		goto done_send_log;
+	cras_fill_client_audio_log_chunk(log_msg);
+
+	read_pos = log->write_pos;
+	chunk_idx = 0;
+	log_msg->chunk_offset = 0;
+	log_msg->chunk_size = AUDIO_THREAD_LOG_CHUNK_SIZE;
+	log_msg->total_size = AUDIO_THREAD_EVENT_LOG_SIZE;
+
+	for (i = 0; i < AUDIO_THREAD_EVENT_LOG_SIZE; i++) {
+		log_msg->chunk[chunk_idx] = log->log[read_pos];
+		read_pos++;
+		read_pos %= AUDIO_THREAD_EVENT_LOG_SIZE;
+		chunk_idx++;
+		if (chunk_idx == AUDIO_THREAD_LOG_CHUNK_SIZE) {
+			cras_rclient_send_message(client, &log_msg->header);
+			log_msg->chunk_offset += chunk_idx;
+			chunk_idx = 0;
+		}
+	}
+	if (chunk_idx) {
+		log_msg->chunk_size = chunk_idx;
+		cras_rclient_send_message(client, &log_msg->header);
+	}
+
+done_send_log:
+	free(log_msg);
+	free(log);
+}
+
 /*
  * Exported Functions.
  */
@@ -333,8 +385,7 @@ int cras_rclient_message_from_client(struct cras_rclient *client,
 		cras_dsp_dump_info();
 		break;
 	case CRAS_SERVER_DUMP_AUDIO_THREAD:
-		audio_thread_dump_thread_info(
-				cras_iodev_list_get_audio_thread());
+		dump_audio_thread_info(client);
 		break;
 	default:
 		break;
@@ -347,6 +398,7 @@ int cras_rclient_message_from_client(struct cras_rclient *client,
 int cras_rclient_send_message(const struct cras_rclient *client,
 			      const struct cras_client_message *msg)
 {
+	syslog(LOG_ERR, "write %zu bytes\n", msg->length);
 	return write(client->fd, msg, msg->length);
 }
 

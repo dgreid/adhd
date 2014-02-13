@@ -163,6 +163,8 @@ struct client_stream {
  * last_command_result - Passes back the result of the last user command.
  * streams - Linked list of streams attached to this client.
  * server_state - RO shared memory region holding server state.
+ * debug_info_callback - Function to call when debug info is received.
+ * debug_log_callback - Function to call when debug log is received.
  */
 struct cras_client {
 	int id;
@@ -176,6 +178,11 @@ struct cras_client {
 	int last_command_result;
 	struct client_stream *streams;
 	const struct cras_server_state *server_state;
+	void (*debug_info_callback)(struct audio_debug_info *);
+	void (*debug_log_callback)(uint32_t total_size,
+				   uint32_t chunk_size,
+				   uint32_t chunk_offset,
+				   uint32_t *chunk);
 };
 
 /*
@@ -1171,6 +1178,23 @@ static int handle_message_from_server(struct cras_client *client)
 		handle_stream_reattach(client, cmsg->stream_id);
 		break;
 	}
+	case CRAS_CLIENT_AUDIO_DEBUG_INFO: {
+		struct cras_client_audio_debug_info *dmsg =
+			(struct cras_client_audio_debug_info *)msg;
+		if (client->debug_info_callback)
+			client->debug_info_callback(&dmsg->info);
+		break;
+	}
+	case CRAS_CLIENT_AUDIO_LOG_CHUNK: {
+		struct cras_client_audio_log_chunk *dmsg =
+			(struct cras_client_audio_log_chunk *)msg;
+		if (client->debug_log_callback)
+			client->debug_log_callback(dmsg->total_size,
+						   dmsg->chunk_size,
+						   dmsg->chunk_offset,
+						   &dmsg->chunk[0]);
+		break;
+	}
 	default:
 		syslog(LOG_WARNING, "Receive unknown command %d", msg->id);
 		break;
@@ -2155,12 +2179,17 @@ int cras_client_dump_dsp_info(struct cras_client *client)
 	return write_message_to_server(client, &msg.header);
 }
 
-int cras_client_dump_audio_thread(struct cras_client *client)
+int cras_client_dump_audio_debug_info(
+	struct cras_client *client, void (*cb)(struct audio_debug_info *info),
+	void (*log_cb)(uint32_t, uint32_t, uint32_t, uint32_t *))
 {
 	struct cras_dump_audio_thread msg;
 
 	if (client == NULL)
 		return -EINVAL;
+
+	client->debug_info_callback = cb;
+	client->debug_log_callback = log_cb;
 
 	cras_fill_dump_audio_thread(&msg);
 	return write_message_to_server(client, &msg.header);

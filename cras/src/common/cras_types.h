@@ -209,4 +209,49 @@ enum CRAS_NODE_TYPE {
 	CRAS_NODE_TYPE_UNKNOWN,
 };
 
+/* Debug info shared from server to client. */
+#define MAX_DEBUG_STREAMS 8
+
+enum AUDIO_THREAD_LOG_EVENTS {
+	AUDIO_THREAD_WAKE = 0x10610600,
+	AUDIO_THREAD_SLEEP,
+	AUDIO_THREAD_READ_AUDIO,
+	AUDIO_THREAD_READ_AUDIO_DONE,
+	AUDIO_THREAD_FILL_AUDIO,
+	AUDIO_THREAD_FILL_AUDIO_DONE,
+	AUDIO_THREAD_WRITE_STREAMS_WAIT,
+	AUDIO_THREAD_WRITE_STREAMS_WAIT_TO,
+	AUDIO_THREAD_WRITE_STREAMS_MIX,
+	AUDIO_THREAD_WRITE_STREAMS_MIXED,
+	AUDIO_THREAD_INPUT_SLEEP,
+	AUDIO_THREAD_OUTPUT_SLEEP,
+	AUDIO_THREAD_LOOP_SLEEP,
+};
+
+struct audio_stream_debug_info {
+	uint64_t stream_id;
+	uint32_t direction;
+	uint32_t buffer_frames;
+	uint32_t cb_threshold;
+	uint32_t min_cb_level;
+	uint32_t flags;
+	uint32_t frame_rate;
+	uint32_t num_channels;
+	uint32_t num_cb_timeouts;
+	int8_t channel_layout[CRAS_CH_MAX];
+};
+
+struct audio_debug_info {
+	char output_dev_name[CRAS_NODE_NAME_BUFFER_SIZE];
+	uint32_t output_buffer_size;
+	uint32_t output_used_size;
+	uint32_t output_cb_threshold;
+	char input_dev_name[CRAS_NODE_NAME_BUFFER_SIZE];
+	uint32_t input_buffer_size;
+	uint32_t input_used_size;
+	uint32_t input_cb_threshold;
+	uint32_t num_streams;
+	struct audio_stream_debug_info streams[MAX_DEBUG_STREAMS];
+};
+
 #endif /* CRAS_TYPES_H_ */

@@ -18,7 +18,7 @@
  * values change. */
 #define CRAS_PROTO_VER 0
 #define CRAS_SERV_MAX_MSG_SIZE 256
-#define CRAS_CLIENT_MAX_MSG_SIZE 256
+#define CRAS_CLIENT_MAX_MSG_SIZE 1024
 
 /* Message IDs. */
 enum CRAS_SERVER_MESSAGE_ID {
@@ -45,6 +45,8 @@ enum CRAS_CLIENT_MESSAGE_ID {
 	CRAS_CLIENT_CONNECTED,
 	CRAS_CLIENT_STREAM_CONNECTED,
 	CRAS_CLIENT_STREAM_REATTACH,
+	CRAS_CLIENT_AUDIO_DEBUG_INFO,
+	CRAS_CLIENT_AUDIO_LOG_CHUNK,
 };
 
 /* Messages that control the server. These are sent from the client to affect
@@ -341,6 +343,39 @@ static inline void cras_fill_client_stream_reattach(
 	m->stream_id = stream_id;
 	m->header.id = CRAS_CLIENT_STREAM_REATTACH;
 	m->header.length = sizeof(struct cras_client_stream_reattach);
+}
+
+/* Sent from server to client when audio debug information is requested.
+ * This is a very large message and shouldn't be sent often.
+ */
+struct cras_client_audio_debug_info {
+	struct cras_client_message header;
+	struct audio_debug_info info;
+};
+static inline void cras_fill_client_audio_debug_info(
+		struct cras_client_audio_debug_info *m)
+{
+	m->header.id = CRAS_CLIENT_AUDIO_DEBUG_INFO;
+	m->header.length = sizeof(*m);
+}
+
+/* Sent from server to client when audio debug info is requested.
+ * This is a very large message and shouldn't be sent often.
+ * It contains the log of audio thread events.
+ */
+#define AUDIO_THREAD_LOG_CHUNK_SIZE 200 /* In 32-bit words */
+struct cras_client_audio_log_chunk {
+	struct cras_client_message header;
+	uint32_t total_size;
+	uint32_t chunk_size;
+	uint32_t chunk_offset;
+	uint32_t chunk[AUDIO_THREAD_LOG_CHUNK_SIZE];
+};
+static inline void cras_fill_client_audio_log_chunk(
+		struct cras_client_audio_log_chunk *m)
+{
+	m->header.id = CRAS_CLIENT_AUDIO_LOG_CHUNK;
+	m->header.length = sizeof(*m);
 }
 
 /*

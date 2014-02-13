@@ -51,6 +51,14 @@ struct audio_thread {
 	struct cras_io_stream *streams;
 };
 
+/* Audio thread logging interface. */
+#define AUDIO_THREAD_EVENT_LOG_SIZE 4096
+/* Ring buffer of log events from the audio thread. */
+struct audio_thread_event_log {
+	uint32_t write_pos;
+	uint32_t log[AUDIO_THREAD_EVENT_LOG_SIZE];
+};
+
 /* Callback function to be handled in main loop in audio thread.
  * Args:
  *    data - The data for callback function.
@@ -153,6 +161,8 @@ void audio_thread_add_loopback_device(struct audio_thread *thread,
 				      struct cras_iodev *loop_dev);
 
 /* Dumps information about all active streams to syslog. */
-int audio_thread_dump_thread_info(struct audio_thread *thread);
+int audio_thread_dump_thread_info(struct audio_thread *thread,
+				  struct audio_debug_info *info,
+				  struct audio_thread_event_log *log);
 
 #endif /* AUDIO_THREAD_H_ */

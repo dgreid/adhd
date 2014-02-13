@@ -220,13 +220,17 @@ int cras_client_reload_dsp(struct cras_client *client);
  */
 int cras_client_dump_dsp_info(struct cras_client *client);
 
-/* Asks the server to dump current audio thread information to syslog.
+/* Asks the server to dump current audio thread information.
  * Args:
  *    client - The client from cras_client_create.
+ *    cb - A function to call when the data is received.
+ *    log_cb - A function to call when audio log chunks are recieved.
  * Returns:
  *    0 on success, -EINVAL if the client isn't valid or isn't running.
  */
-int cras_client_dump_audio_thread(struct cras_client *client);
+int cras_client_dump_audio_debug_info(
+	struct cras_client *client, void (*cb)(struct audio_debug_info *info),
+	void (*log_cb)(uint32_t, uint32_t, uint32_t, uint32_t *));
 
 /*
  * Stream handling.
