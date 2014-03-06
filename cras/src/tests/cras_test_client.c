@@ -406,6 +406,98 @@ static void print_system_volumes(struct cras_client *client)
 	       cras_client_get_system_capture_muted(client) ? "(Muted)" : "");
 }
 
+static int show_alog_tag(const uint32_t *log,
+			 unsigned int tag_start, unsigned int log_len)
+{
+	unsigned int tag = log[tag_start] >> 24;
+	unsigned int arg0 = log[tag_start] & 0x00ffffff;
+	unsigned int arg1 = log[(tag_start + 1) % log_len];
+	unsigned int arg2 = log[(tag_start + 2) % log_len];
+	unsigned int arg3 = log[(tag_start + 3) % log_len];
+	unsigned int arg4 = log[(tag_start + 4) % log_len];
+
+	switch (tag) {
+	case AUDIO_THREAD_WAKE:
+		printf("WAKE: %u.%09u\n", arg0, arg1);
+		return 2;
+	case AUDIO_THREAD_SLEEP:
+		printf("SLEEP: %u.%09u\n", arg0, arg1);
+		return 2;
+	case AUDIO_THREAD_READ_AUDIO:
+		printf("READ_AUDIO: %u.%09u hw_level: %u\n",
+		       arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_READ_AUDIO_DONE:
+		printf("READ_AUDIO_DONE: %u.%09u write_limit %u\n",
+		       arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_FILL_AUDIO:
+		printf("FILL_AUDIO: %u.%09u hw_level %u adj_level %u "
+		       "delay %u\n",
+		       arg0, arg1, arg2, arg3, arg4);
+		return 5;
+	case AUDIO_THREAD_FILL_AUDIO_DONE:
+		printf("FILL_AUDIO_DONE: %u.%09u total_written %u\n",
+		       arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_WRITE_STREAMS_WAIT:
+		printf("WRITE_STREAMS_WAIT: %u.%09u for %u.%06u\n",
+		       arg0, arg1, arg2, arg3);
+		return 4;
+	case AUDIO_THREAD_WRITE_STREAMS_WAIT_TO:
+		printf("WRITE_STREAMS_WAIT_TO: %u.%09u\n",
+		       arg0, arg1);
+		return 2;
+	case AUDIO_THREAD_WRITE_STREAMS_MIX:
+		printf("WRITE_STREAMS_MIX: %u.%09u write_limit %u\n",
+		       arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_WRITE_STREAMS_MIXED:
+		printf("WRITE_STREAMS_MIXED: %u.%09u write_limit %u"
+		       "num_mixed %u\n",
+		       arg0, arg1, arg2, arg3);
+		return 4;
+	case AUDIO_THREAD_INPUT_SLEEP:
+		printf("INPUT_SLEEP: %u.%09u %09u\n", arg0,
+		       arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_OUTPUT_SLEEP:
+		printf("OUTPUT_SLEEP: %u.%09u %09u\n", arg0,
+		       arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_LOOP_SLEEP:
+		printf("LOOP_SLEEP: %u.%u %09u\n", arg0,
+		       arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_WRITE_STREAMS_STREAM:
+		printf("WRITE_STREAMS_STREAM: %u.%09u id %x"
+		       "shm_frames %u cb_pending %u\n",
+		       arg0, arg1, arg2, arg3, arg4);
+		return 5;
+	case AUDIO_THREAD_FETCH_STREAM:
+		printf("WRITE_STREAMS_FETCH_STREAM: %u.%09u id %x cbth %u\n",
+		       arg0, arg1, arg2, arg3);
+		return 4;
+	case AUDIO_THREAD_STREAM_ADDED:
+		printf("STREAM_ADDED: %u.%9u id %x\n", arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_STREAM_REMOVED:
+		printf("STREAM_REMOVED: %u.%9u id %x\n", arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_A2DP_ENCODE:
+		printf("A2DP_ENCODE: %u.%09u processed %u queued %u "
+		       "readable %u\n", arg0, arg1, arg2, arg3, arg4);
+		return 5;
+	case AUDIO_THREAD_A2DP_WRITE:
+		printf("A2DP_WRITE: %u.%09u written %d queued %u\n",
+		       arg0, arg1, (int16_t)arg2, arg3);
+		return 4;
+	default:
+		printf("Unknown alog tag %u\n", tag);
+		return -1;
+	}
+}
+
 static void audio_debug_info(struct cras_client *client)
 {
 	const struct audio_debug_info *info;
@@ -452,11 +544,13 @@ static void audio_debug_info(struct cras_client *client)
 
 	j = info->log.write_pos;
 	for (i = 0; i < AUDIO_THREAD_EVENT_LOG_SIZE; i++) {
-		printf("%x ", info->log.log[j]);
-		j++;
+		int len = show_alog_tag(info->log.log, j,
+					AUDIO_THREAD_EVENT_LOG_SIZE);
+		if (len < 1)
+			break;
+		j += len;
 		j %= AUDIO_THREAD_EVENT_LOG_SIZE;
 	}
-	printf("\n");
 
 	/* Signal main thread we are done after the last chunk. */
 	pthread_mutex_lock(&done_mutex);
