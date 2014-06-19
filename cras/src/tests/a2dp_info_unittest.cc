@@ -59,7 +59,6 @@ void ResetStubData() {
   sbc.max_bitpool = 50;
 
   a2dp.a2dp_buf_used = 0;
-  a2dp.frame_count = 0;
   a2dp.samples = 0;
   a2dp.nsamples = 0;
 }
@@ -80,7 +79,6 @@ TEST(A2dpInfoInit, InitA2dp) {
 
   ASSERT_NE(a2dp.codec, (void *)NULL);
   ASSERT_EQ(a2dp.a2dp_buf_used, 13);
-  ASSERT_EQ(a2dp.frame_count, 0);
   ASSERT_EQ(a2dp.seq_num, 0);
   ASSERT_EQ(a2dp.samples, 0);
 
@@ -112,12 +110,10 @@ TEST(A2dpInfoInit, DrainA2dp) {
   a2dp.a2dp_buf_used = 99;
   a2dp.samples = 10;
   a2dp.seq_num = 11;
-  a2dp.frame_count = 12;
 
   a2dp_drain(&a2dp);
 
   ASSERT_EQ(a2dp.a2dp_buf_used, 13);
-  ASSERT_EQ(a2dp.frame_count, 0);
   ASSERT_EQ(a2dp.seq_num, 0);
   ASSERT_EQ(a2dp.samples, 0);
 
@@ -137,7 +133,6 @@ TEST(A2dpWrite, WriteA2dp) {
   processed = a2dp_write(NULL, 20, &a2dp, 4, sock[0], (size_t)40, &written);
 
   ASSERT_EQ(20, processed);
-  ASSERT_EQ(4, a2dp.frame_count);
 
   // 13 + 4 used a2dp buffer still below half mtu unwritten
   ASSERT_EQ(17, a2dp.a2dp_buf_used);

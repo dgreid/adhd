@@ -77,7 +77,6 @@ int init_a2dp(struct a2dp_info *a2dp, a2dp_sbc_t *sbc)
 
 	a2dp->a2dp_buf_used = sizeof(struct rtp_header)
 			+ sizeof(struct rtp_payload);
-	a2dp->frame_count = 0;
 	a2dp->seq_num = 0;
 	a2dp->samples = 0;
 
@@ -110,7 +109,6 @@ void a2dp_drain(struct a2dp_info *a2dp)
 			+ sizeof(struct rtp_payload);
 	a2dp->samples = 0;
 	a2dp->seq_num = 0;
-	a2dp->frame_count = 0;
 }
 
 int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
@@ -123,7 +121,7 @@ int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
 	payload = (struct rtp_payload *)(a2dp->a2dp_buf + sizeof(*header));
 	memset(a2dp->a2dp_buf, 0, sizeof(*header) + sizeof(*payload));
 
-	payload->frame_count = a2dp->frame_count;
+	payload->frame_count = 1;
 	header->v = 2;
 	header->pt = 1;
 	header->sequence_number = htons(a2dp->seq_num);
@@ -137,7 +135,6 @@ int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
 
 	/* Reset some data */
 	a2dp->a2dp_buf_used = sizeof(*header) + sizeof(*payload);
-	a2dp->frame_count = 0;
 	a2dp->samples = 0;
 	a2dp->seq_num++;
 
@@ -160,8 +157,6 @@ unsigned int a2dp_write(const void *pcm_buf, int pcm_buf_size,
 					link_mtu - a2dp->a2dp_buf_used,
 					&out_encoded);
 
-	if (a2dp->codesize > 0)
-		a2dp->frame_count += processed / a2dp->codesize;
 	a2dp->a2dp_buf_used += out_encoded;
 
 	if (processed) {

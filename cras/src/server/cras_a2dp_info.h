@@ -16,7 +16,6 @@
  *    a2dp_buf - The buffer to hold encoded frames.
  *    codesize - Size of a SBC frame in bytes.
  *    frame_length - Size of an encoded SBC frame in bytes.
- *    frame_count - Queued SBC frame count currently in a2dp buffer.
  *    seq_num - Sequence number in rtp header.
  *    samples - Queued PCM frame count currently in a2dp buffer.
  *    nsamples - Cumulative number of encoded PCM frames.
@@ -27,7 +26,6 @@ struct a2dp_info {
 	uint8_t a2dp_buf[A2DP_BUF_SIZE_BYTES];
 	int codesize;
 	int frame_length;
-	int frame_count;
 	uint16_t seq_num;
 	int samples;
 	int nsamples;
