@@ -111,7 +111,7 @@ void a2dp_drain(struct a2dp_info *a2dp)
 	a2dp->seq_num = 0;
 }
 
-int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
+static int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
 {
 	int err;
 	struct rtp_header *header;
