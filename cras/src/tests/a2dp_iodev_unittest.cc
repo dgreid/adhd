@@ -19,6 +19,8 @@ extern "C" {
 #define FAKE_DEVICE_NAME "fake device name"
 #define FAKE_OBJECT_PATH "/fake/obj/path"
 
+#define MAX_A2DP_WRITE_CALLS 2
+
 static struct cras_bt_transport *fake_transport;
 static struct cras_bt_device *fake_device;
 static cras_audio_format format;
@@ -36,11 +38,12 @@ static size_t destroy_a2dp_called;
 static size_t drain_a2dp_called;
 static size_t a2dp_block_size_called;
 static size_t a2dp_queued_frames_val;
-static size_t a2dp_written_bytes_val;
+static size_t a2dp_written_bytes_val[MAX_A2DP_WRITE_CALLS];
 static size_t cras_iodev_free_format_called;
 static size_t cras_iodev_free_dsp_called;
-static int pcm_buf_size_val;
-static unsigned int a2dp_write_processed_bytes_val;
+static int pcm_buf_size_val[MAX_A2DP_WRITE_CALLS];
+static unsigned int a2dp_write_processed_bytes_val[MAX_A2DP_WRITE_CALLS];
+static unsigned int a2dp_write_index;
 
 void ResetStubData() {
   cras_iodev_list_add_output_called = 0;
@@ -57,10 +60,12 @@ void ResetStubData() {
   drain_a2dp_called = 0;
   a2dp_block_size_called = 0;
   a2dp_queued_frames_val = 0;
-  a2dp_written_bytes_val = 0;
+  memset(a2dp_written_bytes_val, 0, sizeof(a2dp_written_bytes_val));
   cras_iodev_free_format_called = 0;
   cras_iodev_free_dsp_called = 0;
-  a2dp_write_processed_bytes_val = 0;
+  memset(a2dp_write_processed_bytes_val, 0,
+         sizeof(a2dp_write_processed_bytes_val));
+  a2dp_write_index = 0;
 
   fake_transport = reinterpret_cast<struct cras_bt_transport *>(0x123);
   fake_device = NULL;
@@ -157,9 +162,9 @@ TEST(A2dpIoInit, GetPutBuffer) {
   ASSERT_EQ(256, frames);
 
   /* Test 100 frames(400 bytes) put and all processed. */
-  a2dp_write_processed_bytes_val = 400;
+  a2dp_write_processed_bytes_val[0] = 400;
   iodev->put_buffer(iodev, 100);
-  ASSERT_EQ(400, pcm_buf_size_val);
+  ASSERT_EQ(400, pcm_buf_size_val[0]);
   ASSERT_EQ(1, a2dp_block_size_called);
 
   iodev->get_buffer(iodev, &buf2, &frames);
@@ -171,9 +176,14 @@ TEST(A2dpIoInit, GetPutBuffer) {
   /* Test 100 frames(400 bytes) put, only 360 bytes processed,
    * 40 bytes left in pcm buffer.
    */
-  a2dp_write_processed_bytes_val = 360;
+  a2dp_write_index = 0;
+  a2dp_write_processed_bytes_val[0] = 360;
+  a2dp_write_processed_bytes_val[1] = 0;
+  a2dp_written_bytes_val[0] = 360;
+  a2dp_written_bytes_val[1] = 0;
   iodev->put_buffer(iodev, 100);
-  ASSERT_EQ(400, pcm_buf_size_val);
+  ASSERT_EQ(400, pcm_buf_size_val[0]);
+  ASSERT_EQ(40, pcm_buf_size_val[1]);
   ASSERT_EQ(2, a2dp_block_size_called);
 
   iodev->get_buffer(iodev, &buf3, &frames);
@@ -208,9 +218,9 @@ TEST(A2dpIoInif, FramesQueued) {
   /* Put 100 frames, proccessed 400 bytes to a2dp buffer.
    * Assume 200 bytes written out, queued 50 frames in a2dp buffer.
    */
-  a2dp_write_processed_bytes_val = 400;
+  a2dp_write_processed_bytes_val[0] = 400;
   a2dp_queued_frames_val = 50;
-  a2dp_written_bytes_val = 200;
+  a2dp_written_bytes_val[0] = 200;
   time_now.tv_sec = 0;
   time_now.tv_nsec = 1000000;
   iodev->put_buffer(iodev, 100);
@@ -224,9 +234,10 @@ TEST(A2dpIoInif, FramesQueued) {
   ASSERT_EQ(50, iodev->frames_queued(iodev));
 
   /* Queued frames and new put buffer are all written */
-  a2dp_write_processed_bytes_val = 400;
+  a2dp_write_processed_bytes_val[0] = 400;
   a2dp_queued_frames_val = 0;
-  a2dp_written_bytes_val = 600;
+  a2dp_written_bytes_val[0] = 600;
+  a2dp_write_index = 0;
 
   /* After 1 more ms, expect total 132 frames consumed, result 68
    * frames of virtual buffer after total 200 frames put.
@@ -234,7 +245,7 @@ TEST(A2dpIoInif, FramesQueued) {
   time_now.tv_sec = 0;
   time_now.tv_nsec = 3000000;
   iodev->put_buffer(iodev, 100);
-  ASSERT_EQ(400, pcm_buf_size_val);
+  ASSERT_EQ(400, pcm_buf_size_val[0]);
   ASSERT_EQ(68, iodev->frames_queued(iodev));
 }
 
@@ -387,9 +398,11 @@ unsigned int a2dp_write(void *pcm_buf, int pcm_buf_size, struct a2dp_info *a2dp,
 			int format_bytes, int stream_fd, size_t link_mtu,
 			int *written_bytes)
 {
-  pcm_buf_size_val = pcm_buf_size;
-  *written_bytes = a2dp_written_bytes_val;
-  return a2dp_write_processed_bytes_val;
+  unsigned int processed = a2dp_write_processed_bytes_val[a2dp_write_index];
+  pcm_buf_size_val[a2dp_write_index] = pcm_buf_size;
+  *written_bytes = a2dp_written_bytes_val[a2dp_write_index];
+  a2dp_write_index++;
+  return processed;
 }
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp) {

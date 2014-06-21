@@ -215,33 +215,38 @@ static int flush_data(const struct cras_iodev *iodev)
 	a2dpio = (struct a2dp_io *)iodev;
 	format_bytes = cras_get_format_bytes(iodev->format);
 
-	processed = a2dp_write(a2dpio->pcm_buf + a2dpio->pcm_buf_read,
-		       buf_readable_bytes(a2dpio),
-		       &a2dpio->a2dp,
-		       format_bytes,
-		       cras_bt_transport_fd(a2dpio->transport),
-		       cras_bt_transport_write_mtu(a2dpio->transport),
-		       &written);
+	while (buf_queued_bytes(a2dpio)) {
+		processed = a2dp_write(
+				a2dpio->pcm_buf + a2dpio->pcm_buf_read,
+				buf_readable_bytes(a2dpio),
+				&a2dpio->a2dp,
+				format_bytes,
+				cras_bt_transport_fd(a2dpio->transport),
+				cras_bt_transport_write_mtu(a2dpio->transport),
+				&written);
 
-	if (processed < 0)
-		return processed;
-	a2dpio->pcm_buf_read += processed;
-	a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
+		if (processed < 0)
+			return processed;
+		if (processed == 0)
+			break;
+		a2dpio->pcm_buf_read += processed;
+		a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
 
-	if (written == -EAGAIN) {
-		return 0;
-	} else if (written == -ENOTCONN) {
-		if (a2dpio->force_suspend_cb)
-			a2dpio->force_suspend_cb(&a2dpio->base);
-		return -1;
-	} else if (written < 0) {
-		syslog(LOG_ERR, "a2dpio write error %d", written);
-		return written;
+		if (written == -EAGAIN) {
+			return 0;
+		} else if (written == -ENOTCONN) {
+			if (a2dpio->force_suspend_cb)
+				a2dpio->force_suspend_cb(&a2dpio->base);
+			return -1;
+		} else if (written < 0) {
+			syslog(LOG_ERR, "a2dpio write error %d", written);
+			return written;
+		}
+
+		bt_queued_frames(iodev,
+				 a2dp_block_size(&a2dpio->a2dp, written)
+				 / format_bytes);
 	}
-
-	bt_queued_frames(iodev,
-			 a2dp_block_size(&a2dpio->a2dp, written)
-				/ format_bytes);
 
 	return 0;
 }
