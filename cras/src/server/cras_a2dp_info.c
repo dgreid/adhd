@@ -179,7 +179,7 @@ int a2dp_write(struct a2dp_info *a2dp, int stream_fd, size_t link_mtu)
 	/* Do avdtp write once no more pcm buffer processed to a2dp buffer,
 	 * or a2dp buffer already accumulated to half the mtu.
 	 */
-	if (a2dp->a2dp_buf_used > link_mtu / 2)
+	if (a2dp->a2dp_buf_used >= link_mtu - 100)
 		return avdtp_write(stream_fd, a2dp);
 
 	return 0;
