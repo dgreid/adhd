@@ -409,7 +409,7 @@ static void print_system_volumes(struct cras_client *client)
 static int show_alog_tag(const uint32_t *log,
 			 unsigned int tag_start, unsigned int log_len)
 {
-	unsigned int tag = log[tag_start] >> 24;
+	unsigned int tag = (log[tag_start] >> 24) & 0x1f;
 	unsigned int arg0 = log[tag_start] & 0x00ffffff;
 	unsigned int arg1 = log[(tag_start + 1) % log_len];
 	unsigned int arg2 = log[(tag_start + 2) % log_len];
@@ -543,10 +543,18 @@ static void audio_debug_info(struct cras_client *client)
 	printf("Audio Thread Event Log:\n");
 
 	j = info->log.write_pos;
-	for (i = 0; i < AUDIO_THREAD_EVENT_LOG_SIZE; i++) {
+	i = 0;
+	while (((info->log.log[j] & 0xe0000000) != 0xa0000000 ||
+	        (info->log.log[j] >> 24 & 0x1f) > AUDIO_THREAD_A2DP_WRITE) &&
+	       i < AUDIO_THREAD_EVENT_LOG_SIZE) {
+		i++;
+		j = (j + 1) % AUDIO_THREAD_EVENT_LOG_SIZE;
+	}
+	printf("start at %d\n", j);
+	for (; i < AUDIO_THREAD_EVENT_LOG_SIZE; i++) {
 		int len = show_alog_tag(info->log.log, j,
 					AUDIO_THREAD_EVENT_LOG_SIZE);
-		if (len < 1)
+		if (len < 0)
 			break;
 		j += len;
 		j %= AUDIO_THREAD_EVENT_LOG_SIZE;

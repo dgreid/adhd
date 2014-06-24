@@ -48,7 +48,8 @@ static inline void audio_thread_event_log_tag(
 
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 
-	audio_thread_write_word(log, (event << 24) | (ts.tv_sec & 0x00ffffff));
+	audio_thread_write_word(log, (event << 24) | (0xa0000000)
+					| (ts.tv_sec & 0x00ffffff));
 	audio_thread_write_word(log, ts.tv_nsec);
 }
 
