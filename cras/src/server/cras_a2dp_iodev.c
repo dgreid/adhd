@@ -254,7 +254,6 @@ encode_more:
 		if (processed == 0)
 			break;
 
-		bt_queued_frames(iodev, processed / format_bytes);
 		a2dpio->pcm_buf_read += processed;
 		a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
 	}
@@ -266,6 +265,12 @@ encode_more:
 				     written,
 				     a2dp_queued_frames(&a2dpio->a2dp));
 	if (written == -EAGAIN) {
+		/* Reset variables for bt_queued_frames() */
+		a2dpio->bt_written_frames =
+			2 * cras_bt_transport_write_mtu(a2dpio->transport) +
+			a2dp_queued_frames(&a2dpio->a2dp);
+		clock_gettime(CLOCK_MONOTONIC, &a2dpio->dev_open_time);
+		/* Get callback when fd is writable again. */
 		audio_thread_enable_callback(
 				cras_bt_transport_fd(a2dpio->transport), 1);
 		return 0;
@@ -276,6 +281,9 @@ encode_more:
 	} else if (written == 0) {
 		goto write_done;
 	}
+
+	bt_queued_frames(iodev, a2dp_block_size(&a2dpio->a2dp, written)
+					 / format_bytes);
 
 	if (buf_queued_bytes(a2dpio))
 		goto encode_more;
