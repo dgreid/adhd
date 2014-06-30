@@ -9,6 +9,7 @@
 #include <syslog.h>
 #include <time.h>
 
+#include "audio_thread.h"
 #include "cras_a2dp_info.h"
 #include "cras_a2dp_iodev.h"
 #include "cras_bt_device.h"
@@ -18,7 +19,8 @@
 #include "rtp.h"
 #include "utlist.h"
 
-#define PCM_BUF_MAX_SIZE_BYTES 4096 /* 1024 frames of 16 bit stereo */
+#define PCM_BUF_MAX_SIZE_FRAMES 4096
+#define PCM_BUF_MAX_SIZE_BYTES (PCM_BUF_MAX_SIZE_FRAMES * 4)
 
 struct a2dp_io {
 	struct cras_iodev base;
@@ -37,6 +39,8 @@ struct a2dp_io {
 	uint64_t bt_written_frames;
 	struct timespec dev_open_time;
 };
+
+static int flush_data(void *arg);
 
 static int update_supported_formats(struct cras_iodev *iodev)
 {
@@ -133,17 +137,10 @@ static unsigned int buf_queued_bytes(struct a2dp_io *a2dpio)
 
 static int frames_queued(const struct cras_iodev *iodev)
 {
-	size_t format_bytes;
-	int frames;
 	struct a2dp_io *a2dpio = (struct a2dp_io *)iodev;
 
-	format_bytes = cras_get_format_bytes(iodev->format);
-
-	frames = buf_queued_bytes(a2dpio) / format_bytes
-			+ a2dp_queued_frames(&a2dpio->a2dp)
-			+ bt_queued_frames(iodev, 0);
-
-	return frames;
+	return buf_queued_bytes(a2dpio) / cras_get_format_bytes(iodev->format) +
+		bt_queued_frames(iodev, 0);
 }
 
 
@@ -166,14 +163,18 @@ static int open_dev(struct cras_iodev *iodev)
 	a2dpio->pcm_buf_write = 0;
 	a2dpio->pcm_buf_read = 0;
 
-	iodev->buffer_size = PCM_BUF_MAX_SIZE_BYTES
-			/ cras_get_format_bytes(iodev->format);
+	iodev->buffer_size = PCM_BUF_MAX_SIZE_FRAMES;
 
 	syslog(LOG_ERR, "a2dp iodev buf size %lu", iodev->buffer_size);
 
 	/* Initialize variables for bt_queued_frames() */
 	a2dpio->bt_written_frames = 0;
 	clock_gettime(CLOCK_MONOTONIC, &a2dpio->dev_open_time);
+
+	audio_thread_add_write_callback(cras_bt_transport_fd(a2dpio->transport),
+					flush_data, iodev);
+	audio_thread_enable_callback(cras_bt_transport_fd(a2dpio->transport),
+				     0);
 
 	return 0;
 }
@@ -185,6 +186,8 @@ static int close_dev(struct cras_iodev *iodev)
 
 	if (!a2dpio->transport)
 		return 0;
+
+	audio_thread_rm_callback(cras_bt_transport_fd(a2dpio->transport));
 
 	err = cras_bt_transport_release(a2dpio->transport);
 	if (err < 0)
@@ -205,8 +208,9 @@ static int is_open(const struct cras_iodev *iodev)
  * Returns:
  *    0 when the flush succeeded, -1 when error occurred.
  */
-static int flush_data(const struct cras_iodev *iodev)
+static int flush_data(void *arg)
 {
+	const struct cras_iodev *iodev = (const struct cras_iodev *)arg;
 	int processed;
 	size_t format_bytes;
 	int written = 0;
@@ -215,6 +219,7 @@ static int flush_data(const struct cras_iodev *iodev)
 	a2dpio = (struct a2dp_io *)iodev;
 	format_bytes = cras_get_format_bytes(iodev->format);
 
+encode_more:
 	while (buf_queued_bytes(a2dpio)) {
 		processed = a2dp_encode(
 				&a2dpio->a2dp,
@@ -222,54 +227,57 @@ static int flush_data(const struct cras_iodev *iodev)
 				buf_readable_bytes(a2dpio),
 				format_bytes,
 				cras_bt_transport_write_mtu(a2dpio->transport));
-		if (processed < 0) {
-			return processed;
-		} else {
-			a2dpio->pcm_buf_read += processed;
-			a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
-		}
-
-		written = a2dp_write(
-				&a2dpio->a2dp,
-				cras_bt_transport_fd(a2dpio->transport),
-				cras_bt_transport_write_mtu(a2dpio->transport));
-		if (written == -EAGAIN) {
+		if (processed < 0)
 			return 0;
-		} else if (written == -ENOTCONN) {
-			if (a2dpio->force_suspend_cb)
-				a2dpio->force_suspend_cb(&a2dpio->base);
-			return -1;
-		} else if (written < 0) {
-			syslog(LOG_ERR, "a2dpio write error %d", written);
-			return written;
-		} else if (written == 0) {
+		if (processed == 0)
 			break;
-		}
 
-		bt_queued_frames(iodev,
-				 a2dp_block_size(&a2dpio->a2dp, written)
-				 / format_bytes);
+		bt_queued_frames(iodev, processed / format_bytes);
+		a2dpio->pcm_buf_read += processed;
+		a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
 	}
+
+	written = a2dp_write(&a2dpio->a2dp,
+			     cras_bt_transport_fd(a2dpio->transport),
+			     cras_bt_transport_write_mtu(a2dpio->transport));
+	if (written == -EAGAIN) {
+		audio_thread_enable_callback(
+				cras_bt_transport_fd(a2dpio->transport), 1);
+		return 0;
+	} else if (written < 0) {
+		if (a2dpio->force_suspend_cb)
+			a2dpio->force_suspend_cb(&a2dpio->base);
+		goto write_done;
+	} else if (written == 0) {
+		goto write_done;
+	}
+
+	if (buf_queued_bytes(a2dpio))
+		goto encode_more;
+
+write_done:
+	/* everything written. */
+	audio_thread_enable_callback(
+			cras_bt_transport_fd(a2dpio->transport), 0);
 
 	return 0;
 }
 
 static int dev_running(const struct cras_iodev *iodev)
 {
-	int err;
-
-	if (!is_open(iodev))
-		return 0;
-
-	// Flush queued buffer when dev is open.
-	err = flush_data(iodev);
-
-	return !err;
+	return is_open(iodev);
 }
 
 static int delay_frames(const struct cras_iodev *iodev)
 {
-	return frames_queued(iodev);
+	const struct a2dp_io *a2dpio = (struct a2dp_io *)iodev;
+
+	/* The number of frames in the pcm buffer plus the a2dp buffer plus an
+	 * mtu packet worth of delay. */
+	return frames_queued(iodev)
+		+ a2dp_queued_frames(&a2dpio->a2dp)
+		+ cras_bt_transport_write_mtu(a2dpio->transport) /
+			cras_get_format_bytes(iodev->format);
 }
 
 static int get_buffer(struct cras_iodev *iodev, uint8_t **dst, unsigned *frames)
@@ -304,7 +312,8 @@ static int put_buffer(struct cras_iodev *iodev, unsigned nwritten)
 	a2dpio->pcm_buf_write += nwritten * format_bytes;
 	a2dpio->pcm_buf_write %= PCM_BUF_MAX_SIZE_BYTES;
 
-	return flush_data(iodev);
+	flush_data(iodev);
+	return 0;
 }
 
 static void update_active_node(struct cras_iodev *iodev)
