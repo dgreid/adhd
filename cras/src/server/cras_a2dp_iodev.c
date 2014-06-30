@@ -225,10 +225,10 @@ static int flush_data(const struct cras_iodev *iodev)
 				cras_bt_transport_write_mtu(a2dpio->transport),
 				&written);
 
+		if (processed == 0 || processed == -ENOSPC)
+			break;
 		if (processed < 0)
 			return processed;
-		if (processed == 0)
-			break;
 		a2dpio->pcm_buf_read += processed;
 		a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
 
