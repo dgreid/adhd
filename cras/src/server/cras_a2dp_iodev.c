@@ -169,7 +169,6 @@ static int open_dev(struct cras_iodev *iodev)
 
 	iodev->buffer_size = PCM_BUF_MAX_SIZE_FRAMES;
 
-	syslog(LOG_ERR, "a2dp iodev buf size %lu", iodev->buffer_size);
 
 	/* Initialize variables for bt_queued_frames() */
 	a2dpio->bt_written_frames = 0;
@@ -193,6 +192,8 @@ static int open_dev(struct cras_iodev *iodev)
 	audio_thread_enable_callback(cras_bt_transport_fd(a2dpio->transport),
 				     0);
 
+	syslog(LOG_ERR, "a2dp iodev buf size %lu %u", iodev->buffer_size,
+		cras_bt_transport_write_mtu(a2dpio->transport));
 	return 0;
 }
 
