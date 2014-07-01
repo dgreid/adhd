@@ -10,6 +10,7 @@ extern "C" {
 
 #include "a2dp-codecs.h"
 #include "audio_thread.h"
+#include "audio_thread_log.h"
 #include "cras_bt_transport.h"
 #include "cras_iodev.h"
 #include "cras_iodev_list.h"
@@ -94,6 +95,8 @@ static struct timespec time_now;
 
 TEST(A2dpIoInit, InitializeA2dpIodev) {
   struct cras_iodev *iodev;
+
+  atlog = (audio_thread_event_log *)calloc(1, sizeof(audio_thread_event_log));
 
   ResetStubData();
 
@@ -431,6 +434,9 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp) {
   *tp = time_now;
   return 0;
 }
+
+// From audio_thread
+struct audio_thread_event_log *atlog;
 
 void audio_thread_add_write_callback(int fd, thread_callback cb, void *data) {
   write_callback = cb;
