@@ -121,7 +121,7 @@ static int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
 	payload = (struct rtp_payload *)(a2dp->a2dp_buf + sizeof(*header));
 	memset(a2dp->a2dp_buf, 0, sizeof(*header) + sizeof(*payload));
 
-	payload->frame_count = 1;
+	payload->frame_count = a2dp->frame_count;
 	header->v = 2;
 	header->pt = 1;
 	header->sequence_number = htons(a2dp->seq_num);
@@ -137,6 +137,7 @@ static int avdtp_write(int stream_fd, struct a2dp_info *a2dp)
 	a2dp->a2dp_buf_used = sizeof(*header) + sizeof(*payload);
 	a2dp->samples = 0;
 	a2dp->seq_num++;
+	a2dp->frame_count = 0;
 
 	return err;
 }
@@ -159,12 +160,15 @@ int a2dp_encode(struct a2dp_info *a2dp, const void *pcm_buf, int pcm_buf_size,
 	if (processed < 0) {
 		syslog(LOG_ERR, "a2dp encode error %d", processed);
 		return processed;
+	} else if (processed == 0) {
+		return processed;
 	}
 
 	a2dp->a2dp_buf_used += out_encoded;
 
 	a2dp->samples += processed / format_bytes;
 	a2dp->nsamples += processed / format_bytes;
+	a2dp->frame_count++;
 
 	return processed;
 }

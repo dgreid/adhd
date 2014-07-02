@@ -30,6 +30,7 @@ struct a2dp_info {
 	int samples;
 	int nsamples;
 	size_t a2dp_buf_used;
+	unsigned int frame_count;
 };
 
 /*
