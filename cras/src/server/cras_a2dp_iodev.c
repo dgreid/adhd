@@ -171,6 +171,8 @@ static int open_dev(struct cras_iodev *iodev)
 	a2dpio->write_level_frames = 0;
 
 	iodev->buffer_size = PCM_BUF_MAX_SIZE_FRAMES;
+	/* TODO(dgreid) - this should be 2 * (mtu size in frames) */
+	iodev->min_buffer_level = 2048;
 
 
 	/* Initialize variables for bt_queued_frames() */
