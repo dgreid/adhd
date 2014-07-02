@@ -34,6 +34,7 @@ struct a2dp_io {
 	uint8_t pcm_buf[PCM_BUF_MAX_SIZE_BYTES];
 	unsigned int pcm_buf_write;
 	unsigned int pcm_buf_read;
+	unsigned int pcm_buf_level;
 
 	/* Accumulated frames written to a2dp socket. Will need this info
 	 * together with the device open time stamp to get how many virtual
@@ -116,6 +117,8 @@ static int bt_queued_frames(const struct cras_iodev *iodev, int fr)
 
 static unsigned int buf_writable_bytes(struct a2dp_io *a2dpio)
 {
+	if (a2dpio->pcm_buf_level >= PCM_BUF_MAX_SIZE_BYTES)
+		return 0;
 	if (a2dpio->pcm_buf_write < a2dpio->pcm_buf_read)
 		return a2dpio->pcm_buf_read - a2dpio->pcm_buf_write;
 
@@ -124,7 +127,10 @@ static unsigned int buf_writable_bytes(struct a2dp_io *a2dpio)
 
 static unsigned int buf_readable_bytes(struct a2dp_io *a2dpio)
 {
-	if (a2dpio->pcm_buf_read <= a2dpio->pcm_buf_write)
+	if (a2dpio->pcm_buf_level == 0)
+		return 0;
+
+	if (a2dpio->pcm_buf_read < a2dpio->pcm_buf_write)
 		return a2dpio->pcm_buf_write - a2dpio->pcm_buf_read;
 
 	return PCM_BUF_MAX_SIZE_BYTES - a2dpio->pcm_buf_read;
@@ -132,20 +138,15 @@ static unsigned int buf_readable_bytes(struct a2dp_io *a2dpio)
 
 static unsigned int buf_queued_bytes(struct a2dp_io *a2dpio)
 {
-	if (a2dpio->pcm_buf_read <= a2dpio->pcm_buf_write)
-		return a2dpio->pcm_buf_write - a2dpio->pcm_buf_read;
-	return PCM_BUF_MAX_SIZE_BYTES - a2dpio->pcm_buf_read +
-			a2dpio->pcm_buf_write;
+	return a2dpio->pcm_buf_level;
 }
 
 static int frames_queued(const struct cras_iodev *iodev)
 {
 	struct a2dp_io *a2dpio = (struct a2dp_io *)iodev;
-
-	return buf_queued_bytes(a2dpio) / cras_get_format_bytes(iodev->format) +
-		bt_queued_frames(iodev, 0);
+	return MIN(iodev->buffer_size, a2dpio->pcm_buf_level /
+					cras_get_format_bytes(iodev->format));
 }
-
 
 static int open_dev(struct cras_iodev *iodev)
 {
@@ -166,6 +167,8 @@ static int open_dev(struct cras_iodev *iodev)
 
 	a2dpio->pcm_buf_write = 0;
 	a2dpio->pcm_buf_read = 0;
+	a2dpio->pcm_buf_level = 0;
+	a2dpio->write_level_frames = 0;
 
 	iodev->buffer_size = PCM_BUF_MAX_SIZE_FRAMES;
 
@@ -257,6 +260,7 @@ encode_more:
 
 		a2dpio->pcm_buf_read += processed;
 		a2dpio->pcm_buf_read %= PCM_BUF_MAX_SIZE_BYTES;
+		a2dpio->pcm_buf_level -= processed;
 	}
 
 	written = a2dp_write(&a2dpio->a2dp,
@@ -345,6 +349,7 @@ static int put_buffer(struct cras_iodev *iodev, unsigned nwritten)
 
 	a2dpio->pcm_buf_write += nwritten * format_bytes;
 	a2dpio->pcm_buf_write %= PCM_BUF_MAX_SIZE_BYTES;
+	a2dpio->pcm_buf_level += nwritten * format_bytes;
 
 	flush_data(iodev);
 	return 0;
