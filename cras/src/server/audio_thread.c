@@ -79,6 +79,10 @@ struct audio_thread_metrics_log_msg {
 /* Audio thread logging. */
 struct audio_thread_event_log *atlog;
 
+/* forward declarations */
+static int thread_remove_stream(struct audio_thread *thread,
+				struct cras_rstream *stream);
+
 /* For capture, the amount of frames that will be left after a read is
  * performed.  Sleep this many frames past the buffer size to be sure at least
  * the buffer size is captured when the audio thread wakes up.
@@ -300,6 +304,65 @@ static int active_streams(const struct audio_thread *thread,
 	}
 
 	return *in_active || *out_active || *loop_active;
+}
+
+/* Calculates the length of timeout period and updates the longest
+ * timeout value.
+ */
+static void update_stream_timeout(struct cras_audio_shm *shm)
+{
+	struct timespec diff;
+	int timeout_msec = 0;
+	int longest_timeout_msec;
+
+	cras_shm_since_first_timeout(shm, &diff);
+	if (!diff.tv_sec && !diff.tv_nsec)
+		return;
+
+	timeout_msec = diff.tv_sec * 1000 + diff.tv_nsec / 1000000;
+	longest_timeout_msec = cras_shm_get_longest_timeout(shm);
+	if (timeout_msec > longest_timeout_msec)
+		cras_shm_set_longest_timeout(shm, timeout_msec);
+}
+
+/* Requests audio from a stream and marks it as pending. */
+static int fetch_stream(struct audio_thread *thread,
+			struct cras_io_stream *curr,
+			unsigned int frames_in_buff,
+			unsigned int fr_rate)
+{
+	struct cras_audio_shm *shm = cras_rstream_output_shm(curr->stream);
+	struct timespec ts;
+	int rc;
+
+	audio_thread_event_log_data2(
+			atlog,
+			AUDIO_THREAD_FETCH_STREAM,
+			curr->stream->stream_id,
+			cras_rstream_get_cb_threshold(curr->stream));
+	rc = cras_rstream_request_audio(curr->stream);
+
+	/* Keep the stream for playback if the shm is not empty. */
+	if (rc < 0 && frames_in_buff == 0) {
+		syslog(LOG_ERR, "request audio fail: %d, remove stream.", rc);
+		thread_remove_stream(thread, curr->stream);
+		/* If this failed and was the last stream,
+		 * return, otherwise, on to the next one */
+		if (!output_streams_attached(thread))
+			return -EIO;
+		return 0;
+	}
+	if (rc < 0) {
+		syslog(LOG_ERR, "request audio fail: %d.", rc);
+		cras_rstream_set_is_draining(curr->stream, 1);
+		return 0;
+	}
+
+	update_stream_timeout(shm);
+	cras_shm_clear_first_timeout(shm);
+	cras_shm_set_callback_pending(shm, 1);
+
+	return 0;
 }
 
 static int append_stream(struct audio_thread *thread,
@@ -815,25 +878,6 @@ static void flush_old_aud_messages(struct cras_audio_shm *shm, int fd)
 	} while (err > 0);
 }
 
-/* Calculates the length of timeout period and updates the longest
- * timeout value.
- */
-static void update_stream_timeout(struct cras_audio_shm *shm)
-{
-	struct timespec diff;
-	int timeout_msec = 0;
-	int longest_timeout_msec;
-
-	cras_shm_since_first_timeout(shm, &diff);
-	if (!diff.tv_sec && !diff.tv_nsec)
-		return;
-
-	timeout_msec = diff.tv_sec * 1000 + diff.tv_nsec / 1000000;
-	longest_timeout_msec = cras_shm_get_longest_timeout(shm);
-	if (timeout_msec > longest_timeout_msec)
-		cras_shm_set_longest_timeout(shm, timeout_msec);
-}
-
 /* Removes those streams which are both disconnected and empty. */
 static int remove_empty_streams(struct audio_thread *thread)
 {
@@ -905,33 +949,10 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 		if (!cras_shm_callback_pending(shm) &&
 		    cras_shm_is_buffer_available(shm) &&
 		    !cras_rstream_get_is_draining(curr->stream)) {
-			audio_thread_event_log_data2(
-				atlog,
-				AUDIO_THREAD_FETCH_STREAM,
-				curr->stream->stream_id,
-				cras_rstream_get_cb_threshold(curr->stream));
-			rc = cras_rstream_request_audio(curr->stream);
-
-			/* Keep the stream for playback if the shm is not empty. */
-			if (rc < 0 && frames_in_buff == 0) {
-				syslog(LOG_ERR,
-				       "request audio fail: %d, remove stream.",
-				       rc);
-				thread_remove_stream(thread, curr->stream);
-				/* If this failed and was the last stream,
-				 * return, otherwise, on to the next one */
-				if (!output_streams_attached(thread))
-					return -EIO;
-				continue;
-			}
-			if (rc < 0) {
-				syslog(LOG_ERR, "request audio fail: %d.", rc);
-				cras_rstream_set_is_draining(curr->stream, 1);
-				continue;
-			}
-			update_stream_timeout(shm);
-			cras_shm_clear_first_timeout(shm);
-			cras_shm_set_callback_pending(shm, 1);
+			rc = fetch_stream(thread, curr, frames_in_buff,
+					  fr_rate);
+			if (rc < 0)
+				return rc;
 		}
 	}
 
