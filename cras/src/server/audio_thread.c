@@ -325,6 +325,34 @@ static void update_stream_timeout(struct cras_audio_shm *shm)
 		cras_shm_set_longest_timeout(shm, timeout_msec);
 }
 
+/* Gets the first active device for given direction. */
+static inline
+struct cras_iodev *first_active_device(const struct audio_thread *thread,
+				       enum CRAS_STREAM_DIRECTION dir)
+{
+	return thread->active_devs[dir]
+			? thread->active_devs[dir]->dev
+			: NULL;
+}
+
+static inline
+struct cras_iodev *first_output_dev(const struct audio_thread *thread)
+{
+	return first_active_device(thread, CRAS_STREAM_OUTPUT);
+}
+
+static inline
+struct cras_iodev *first_input_dev(const struct audio_thread *thread)
+{
+	return first_active_device(thread, CRAS_STREAM_INPUT);
+}
+
+static inline
+struct cras_iodev *first_loop_dev(const struct audio_thread *thread)
+{
+	return first_active_device(thread, CRAS_STREAM_POST_MIX_PRE_DSP);
+}
+
 /* Requests audio from a stream and marks it as pending. */
 static int fetch_stream(struct audio_thread *thread,
 			struct cras_io_stream *curr,
@@ -358,6 +386,11 @@ static int fetch_stream(struct audio_thread *thread,
 		return 0;
 	}
 
+	/* Set the next timeout time. */
+	cras_frames_to_time(curr->stream->cb_threshold,
+			fr_rate, &ts);
+	add_timespecs(&curr->next_cb_ts, &ts);
+
 	update_stream_timeout(shm);
 	cras_shm_clear_first_timeout(shm);
 	cras_shm_set_callback_pending(shm, 1);
@@ -382,6 +415,22 @@ static int append_stream(struct audio_thread *thread,
 	out->stream = stream;
 	out->fd = cras_rstream_get_audio_fd(stream);
 	DL_APPEND(thread->streams, out);
+
+	if (stream_uses_output(stream)) {
+		/* Set the time for the first callback(now), start off with one
+		 * cb_threshold of data (zeros) and request data. */
+		clock_gettime(CLOCK_MONOTONIC, &out->next_cb_ts);
+		cras_shm_buffer_written(cras_rstream_output_shm(stream),
+					stream->cb_threshold);
+	} else {
+		struct timespec sleep_ts;
+		clock_gettime(CLOCK_MONOTONIC, &out->next_cb_ts);
+		cras_frames_to_time(
+			stream->cb_threshold + CAP_REMAINING_FRAMES_TARGET,
+			first_input_dev(thread)->format->frame_rate,
+			&sleep_ts);
+		add_timespecs(&out->next_cb_ts, &sleep_ts);
+	}
 
 	return 0;
 }
@@ -414,34 +463,6 @@ static int delete_stream(struct audio_thread *thread,
 	return 0;
 }
 
-/* Gets the first active device for given direction. */
-static inline
-struct cras_iodev *first_active_device(const struct audio_thread *thread,
-				       enum CRAS_STREAM_DIRECTION dir)
-{
-	return thread->active_devs[dir]
-			? thread->active_devs[dir]->dev
-			: NULL;
-}
-
-static inline
-struct cras_iodev *first_output_dev(const struct audio_thread *thread)
-{
-	return first_active_device(thread, CRAS_STREAM_OUTPUT);
-}
-
-static inline
-struct cras_iodev *first_input_dev(const struct audio_thread *thread)
-{
-	return first_active_device(thread, CRAS_STREAM_INPUT);
-}
-
-static inline
-struct cras_iodev *first_loop_dev(const struct audio_thread *thread)
-{
-	return first_active_device(thread, CRAS_STREAM_POST_MIX_PRE_DSP);
-}
-
 /* Close a device if it's been opened. */
 static inline int close_device(struct cras_iodev *dev)
 {
@@ -466,6 +487,8 @@ static int close_devices(struct audio_thread *thread,
 	thread->devs_open[dir] = 0;
 	thread->buffer_frames[dir] = 0;
 	thread->cb_threshold[dir] = 0;
+	if (dir == CRAS_STREAM_OUTPUT)
+		thread->drain_sleep.tv_sec = 0;
 	return err;
 }
 
@@ -640,6 +663,9 @@ static void devices_set_output_draining(struct audio_thread *thread,
 		adev->dev->is_draining = is_draining;
 		adev->dev->extra_silent_frames = 0;
 	}
+
+	if (!is_draining)
+		thread->drain_sleep.tv_sec = 0;
 }
 
 /* Remove stream from the audio thread. If this is the last stream to be
@@ -901,14 +927,12 @@ static int remove_empty_streams(struct audio_thread *thread)
 /* Asks any stream with room for more data. Sets the time stamp for all streams.
  * Args:
  *    thread - The thread to fetch samples for.
- *    hw_level - Amount of data in the hw buffer.
  *    delay - How much latency is queued to the device (frames).
  * Returns:
  *    0 on success, negative error on failure. If failed, can assume that all
  *    streams have been removed from the device.
  */
 static int fetch_and_set_timestamp(struct audio_thread *thread,
-				   unsigned int hw_level,
 				   size_t delay)
 {
 	struct cras_iodev *odev = first_output_dev(thread);
@@ -922,6 +946,7 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 	DL_FOREACH(thread->streams, curr) {
 		struct cras_audio_shm *shm =
 			cras_rstream_output_shm(curr->stream);
+		struct timespec now;
 
 		if (!stream_uses_output(curr->stream))
 			continue;
@@ -940,10 +965,9 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 						  frames_in_buff + delay,
 						  &shm->area->ts);
 
-		/* If we already have enough data, don't poll this stream. */
-		if (frames_in_buff + hw_level >
-		    cras_rstream_get_cb_threshold(curr->stream) +
-				SLEEP_FUZZ_FRAMES)
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		/* Check if it's time to get more data from this stream. */
+		if (!timespec_after(&now, &curr->next_cb_ts))
 			continue;
 
 		if (!cras_shm_callback_pending(shm) &&
@@ -953,6 +977,10 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 					  fr_rate);
 			if (rc < 0)
 				return rc;
+		} else {
+			audio_thread_event_log_data(atlog,
+					AUDIO_THREAD_STREAM_SKIP_CB,
+					curr->stream->stream_id);
 		}
 	}
 
@@ -1429,48 +1457,61 @@ static unsigned int adjust_level(const struct audio_thread *thread,
 			: 0;
 }
 
-/* Returns the number of frames that can be slept for before an output stream
- * needs to be serviced.
- */
-static int get_output_sleep_frames(struct audio_thread *thread)
+/* Fills the time that the next stream needs to be serviced. */
+static void get_next_stream_wake(struct audio_thread *thread,
+				 struct timespec *min_ts)
 {
-	struct cras_iodev *odev = first_output_dev(thread);
 	struct cras_io_stream *curr;
-	unsigned int adjusted_level;
-	unsigned int sleep_frames;
-	int rc;
+	struct timespec now;
+	struct active_dev *adev;
 
-	rc = odev->frames_queued(odev);
-	if (rc < 0)
-		return rc;
-	adjusted_level = adjust_level(thread, rc);
+	clock_gettime(CLOCK_MONOTONIC, &now);
 
-	if (adjusted_level < thread->cb_threshold[CRAS_STREAM_OUTPUT])
-		return 0;
-	sleep_frames = adjusted_level - thread->cb_threshold[CRAS_STREAM_OUTPUT];
+	/* Limit the sleep time to 20 seconds. */
+	min_ts->tv_sec = 20;
+	min_ts->tv_nsec = 0;
+	add_timespecs(min_ts, &now);
+
 	DL_FOREACH(thread->streams, curr) {
-		struct cras_audio_shm *shm =
-			cras_rstream_output_shm(curr->stream);
-		unsigned int cb_thresh;
-		unsigned int frames_in_buff;
-
-		if (curr->stream->client == NULL ||
-		    curr->stream->direction != CRAS_STREAM_OUTPUT)
+		if (cras_rstream_get_is_draining(curr->stream))
 			continue;
 
-		cb_thresh = cras_rstream_get_cb_threshold(curr->stream);
-		rc = cras_shm_get_frames(shm);
-		if (rc < 0)
-			return rc;
-		frames_in_buff = rc + adjusted_level;
-		if (frames_in_buff < cb_thresh)
-			sleep_frames = 0;
-		else
-			sleep_frames = MIN(sleep_frames,
-					   frames_in_buff - cb_thresh);
+		/* Make sure the sleep time isn't negative. If we've missed the
+		 * wake up for a stream correct the next time to now. */
+		if (timespec_after(&now, &curr->next_cb_ts)) {
+			audio_thread_event_log_data3(atlog,
+					AUDIO_THREAD_STREAM_SLEEP_ADJUST,
+					curr->stream->stream_id,
+					curr->next_cb_ts.tv_sec,
+					curr->next_cb_ts.tv_nsec);
+			curr->next_cb_ts = now;
+		}
+
+		audio_thread_event_log_data3(atlog,
+			AUDIO_THREAD_STREAM_SLEEP_TIME,
+			curr->stream->stream_id,
+			curr->next_cb_ts.tv_sec,
+			curr->next_cb_ts.tv_nsec);
+		if (timespec_after(min_ts, &curr->next_cb_ts))
+			*min_ts = curr->next_cb_ts;
 	}
 
-	return sleep_frames;
+	if (thread->drain_sleep.tv_sec)
+		if (timespec_after(min_ts, &thread->drain_sleep))
+			*min_ts = thread->drain_sleep;
+
+	DL_FOREACH(thread->active_devs[CRAS_STREAM_OUTPUT], adev) {
+		if (!device_open(adev->dev))
+			continue;
+		if (timespec_after(min_ts, &adev->wake_ts))
+			*min_ts = adev->wake_ts;
+	}
+	DL_FOREACH(thread->active_devs[CRAS_STREAM_INPUT], adev) {
+		if (!device_open(adev->dev))
+			continue;
+		if (timespec_after(min_ts, &adev->wake_ts))
+			*min_ts = adev->wake_ts;
+	}
 }
 
 /* Drain the hardware buffer of odev.
@@ -1480,12 +1521,14 @@ static int get_output_sleep_frames(struct audio_thread *thread)
  *      before closing the device.
  */
 int drain_output_buffer(struct audio_thread *thread,
-			struct cras_iodev *odev,
-			unsigned int *sleep_frames) {
+			struct cras_iodev *odev)
+{
 	int hw_level;
 	int filled_count;
 	int cb_threshold;
 	int buffer_frames;
+	unsigned int sleep_frames;
+	struct timespec sleep_ts;
 
 	cb_threshold = thread->cb_threshold[CRAS_STREAM_OUTPUT];
 	buffer_frames = odev->buffer_size;
@@ -1507,21 +1550,53 @@ int drain_output_buffer(struct audio_thread *thread,
 
 	/* Sleep until 1.) There is only cb_threshold frames in buffer or
 		       2.) The audio has been consumed. */
-	*sleep_frames = MIN(hw_level + filled_count - cb_threshold,
-			    SLEEP_FUZZ_FRAMES + hw_level + filled_count -
-			    (int)odev->extra_silent_frames);
+	sleep_frames = MIN(hw_level + filled_count - cb_threshold,
+			   SLEEP_FUZZ_FRAMES + hw_level + filled_count -
+			   (int)odev->extra_silent_frames);
+	clock_gettime(CLOCK_MONOTONIC, &thread->drain_sleep);
+	cras_frames_to_time(sleep_frames, odev->format->frame_rate, &sleep_ts);
+	add_timespecs(&thread->drain_sleep, &sleep_ts);
+
 	return 0;
+}
+
+static void set_odev_sleep_times(struct audio_thread *thread)
+{
+	/* TODO(dgreid) - handle multiple outputs. */
+	struct active_dev *adev = thread->active_devs[CRAS_STREAM_OUTPUT];
+	int hw_level;
+	unsigned int adjusted_level;
+	unsigned int cb_threshold;
+
+	clock_gettime(CLOCK_MONOTONIC, &adev->wake_ts);
+
+	hw_level = adev->dev->frames_queued(adev->dev);
+	if (hw_level < 0)
+		return;
+
+	adjusted_level = adjust_level(thread, hw_level);
+	cb_threshold = thread->cb_threshold[CRAS_STREAM_OUTPUT];
+	if (adjusted_level > cb_threshold) {
+		struct timespec sleep_time;
+
+		cras_frames_to_time(adjusted_level - cb_threshold,
+				    adev->dev->format->frame_rate,
+				    &sleep_time);
+		add_timespecs(&adev->wake_ts, &sleep_time);
+		audio_thread_event_log_data3(atlog,
+					     AUDIO_THREAD_DEV_SLEEP_TIME,
+					     adev->dev->info.idx,
+					     adev->wake_ts.tv_sec,
+					     adev->wake_ts.tv_nsec);
+	}
 }
 
 /* Transfer samples from clients to the audio device.
  * Return the number of samples written to the device.
  * Args:
  *    thread - the audio thread this is running for.
- *    next_sleep_frames - filled with the minimum number of frames needed before
- *        the next wake up.
  */
-int possibly_fill_audio(struct audio_thread *thread,
-			unsigned int *next_sleep_frames)
+int possibly_fill_audio(struct audio_thread *thread)
 {
 	unsigned int frames, fr_to_req;
 	snd_pcm_sframes_t written;
@@ -1539,7 +1614,7 @@ int possibly_fill_audio(struct audio_thread *thread,
 		return 0;
 
 	if (odev->is_draining)
-		return drain_output_buffer(thread, odev, next_sleep_frames);
+		return drain_output_buffer(thread, odev);
 
 	frame_bytes = cras_get_format_bytes(odev->format);
 
@@ -1558,13 +1633,12 @@ int possibly_fill_audio(struct audio_thread *thread,
 	/* Account for the dsp delay in addition to the hardware delay. */
 	delay += get_dsp_delay(odev);
 
-	/* Request data from streams that need more, and don't request more
-	 * then hardware can hold. */
-	fr_to_req = odev->buffer_size - hw_level;
-
-	rc = fetch_and_set_timestamp(thread, adjusted_level, delay);
+	rc = fetch_and_set_timestamp(thread, delay);
 	if (rc < 0)
 		return rc;
+
+	/* Don't request more than hardware can hold. */
+	fr_to_req = odev->buffer_size - hw_level;
 
 	/* Have to loop writing to the device, will be at most 2 loops, this
 	 * only happens when the circular buffer is at the end and returns us a
@@ -1617,15 +1691,7 @@ int possibly_fill_audio(struct audio_thread *thread,
 	if (rc < 0)
 		return rc;
 
-	/* We may close the device in remove_empty_streams() if there
-	 * is no output streams. In that case, no need to get the sleep
-	 * frames here. */
-	if (device_open(odev)) {
-		rc = get_output_sleep_frames(thread);
-		if (rc < 0)
-			return rc;
-		*next_sleep_frames = rc;
-	}
+	set_odev_sleep_times(thread);
 
 	audio_thread_event_log_data(atlog, AUDIO_THREAD_FILL_AUDIO_DONE,
 				    total_written);
@@ -1758,12 +1824,9 @@ static int capture_to_streams(const struct cras_io_stream *streams,
  * Args:
  *    thread - the audio thread this is running for.
  *    dir - the direction of device to read samples from.
- *    min_sleep - Will be filled with the minimum amount of frames needed to
- *      fill the next lowest latency stream's buffer.
  */
 int possibly_read_audio(struct audio_thread *thread,
-			enum CRAS_STREAM_DIRECTION dir,
-			unsigned int *min_sleep)
+			enum CRAS_STREAM_DIRECTION dir)
 {
 	struct cras_audio_shm *shm;
 	struct cras_io_stream *stream;
@@ -1799,14 +1862,10 @@ int possibly_read_audio(struct audio_thread *thread,
 			return rc;
 	}
 
-	/* Minimum sleep frames should not be larger than the used callback
-	 * threshold in frames for given direction.
-	 */
-	*min_sleep = thread->cb_threshold[dir];
-
 	DL_FOREACH(thread->streams, stream) {
 		struct cras_rstream *rstream;
 		unsigned int cb_threshold;
+		struct timespec sleep_ts;
 
 		rstream = stream->stream;
 
@@ -1818,17 +1877,14 @@ int possibly_read_audio(struct audio_thread *thread,
 		cb_threshold = cras_rstream_get_cb_threshold(rstream);
 
 		/* If this stream doesn't have enough data yet, skip it. */
-		if (cras_shm_frames_written(shm) < cb_threshold) {
-			unsigned int needed =
-				cb_threshold - cras_shm_frames_written(shm);
-			*min_sleep = MIN(*min_sleep, needed);
+		if (cras_shm_frames_written(shm) < cb_threshold)
 			continue;
-		}
-
-		/* Enough data for this stream, sleep until ready again. */
-		*min_sleep = MIN(*min_sleep, cb_threshold);
 
 		cras_shm_buffer_write_complete(shm);
+		cras_frames_to_time(stream->stream->cb_threshold,
+				    first_input_dev(thread)->format->frame_rate,
+				    &sleep_ts);
+		add_timespecs(&stream->next_cb_ts, &sleep_ts);
 
 		/* Tell the client that samples are ready. */
 		rc = cras_rstream_audio_ready(
@@ -1845,18 +1901,6 @@ int possibly_read_audio(struct audio_thread *thread,
 				cras_rstream_output_shm(rstream), 1);
 	}
 
-	if (dir == CRAS_STREAM_POST_MIX_PRE_DSP) {
-		/* No hardware clock here to correct for, just sleep for another
-		 * period.
-		 */
-		*min_sleep = thread->cb_threshold[dir];
-	} else {
-		*min_sleep = cras_iodev_sleep_frames(dir,
-				*min_sleep,
-				hw_level - write_limit) +
-			CAP_REMAINING_FRAMES_TARGET;
-	}
-
 	audio_thread_event_log_data(atlog, AUDIO_THREAD_READ_AUDIO_DONE,
 				    write_limit);
 
@@ -1866,13 +1910,8 @@ int possibly_read_audio(struct audio_thread *thread,
 /* Reads and/or writes audio sampels from/to the devices. */
 static int unified_io(struct audio_thread *thread, struct timespec *ts)
 {
-	struct cras_iodev *odev = first_output_dev(thread);
-	struct cras_iodev *idev = first_input_dev(thread);
 	struct cras_iodev *loopdev = first_loop_dev(thread);
 	int rc;
-	unsigned int cap_sleep_frames, pb_sleep_frames, loop_sleep_frames;
-	struct timespec cap_ts, pb_ts, loop_ts;
-	struct timespec *sleep_ts = NULL;
 
 	ts->tv_sec = 0;
 	ts->tv_nsec = 0;
@@ -1882,16 +1921,13 @@ static int unified_io(struct audio_thread *thread, struct timespec *ts)
 	    thread->devs_open[CRAS_STREAM_POST_MIX_PRE_DSP]) {
 		loopback_iodev_add_zeros(loopdev,
 			thread->cb_threshold[CRAS_STREAM_POST_MIX_PRE_DSP]);
-		loop_sleep_frames =
-			thread->cb_threshold[CRAS_STREAM_POST_MIX_PRE_DSP];
 	}
 
 	possibly_read_audio(thread,
-			    CRAS_STREAM_POST_MIX_PRE_DSP,
-			    &loop_sleep_frames);
+			    CRAS_STREAM_POST_MIX_PRE_DSP);
 
 	/* Capture streams. */
-	rc = possibly_read_audio(thread, CRAS_STREAM_INPUT, &cap_sleep_frames);
+	rc = possibly_read_audio(thread, CRAS_STREAM_INPUT);
 	if (rc < 0) {
 		syslog(LOG_ERR, "read audio failed from audio thread");
 		close_devices(thread, CRAS_STREAM_INPUT);
@@ -1899,50 +1935,20 @@ static int unified_io(struct audio_thread *thread, struct timespec *ts)
 	}
 
 	/* Output streams. */
-	rc = possibly_fill_audio(thread, &pb_sleep_frames);
+	rc = possibly_fill_audio(thread);
 	if (rc < 0) {
 		syslog(LOG_ERR, "write audio failed from audio thread");
 		close_devices(thread, CRAS_STREAM_OUTPUT);
 		return rc;
 	}
 
-	/* Determine which device, if any are open, needs to wake up next. */
+	/* Which stream, if any devs are open, should wake up next. */
 	if (!thread->devs_open[CRAS_STREAM_INPUT] &&
 	    !thread->devs_open[CRAS_STREAM_OUTPUT] &&
 	    !thread->devs_open[CRAS_STREAM_POST_MIX_PRE_DSP])
 		return 0;
 
-	/* Determine which device, if any are open, needs to wake up next. */
-	if (thread->devs_open[CRAS_STREAM_INPUT]) {
-		cras_iodev_fill_time_from_frames(cap_sleep_frames,
-						 idev->format->frame_rate,
-						 &cap_ts);
-		sleep_ts = &cap_ts;
-		audio_thread_event_log_data(atlog, AUDIO_THREAD_INPUT_SLEEP,
-					    sleep_ts->tv_nsec);
-	}
-
-	if (thread->devs_open[CRAS_STREAM_OUTPUT]) {
-		cras_iodev_fill_time_from_frames(pb_sleep_frames,
-						 odev->format->frame_rate,
-						 &pb_ts);
-		if (!sleep_ts || timespec_after(sleep_ts, &pb_ts))
-			sleep_ts = &pb_ts;
-		audio_thread_event_log_data(atlog, AUDIO_THREAD_OUTPUT_SLEEP,
-					    sleep_ts->tv_nsec);
-	}
-
-	if (thread->devs_open[CRAS_STREAM_POST_MIX_PRE_DSP]) {
-		cras_iodev_fill_time_from_frames(loop_sleep_frames,
-						 loopdev->format->frame_rate,
-						 &loop_ts);
-		if (!sleep_ts || timespec_after(sleep_ts, &loop_ts))
-			sleep_ts = &loop_ts;
-		audio_thread_event_log_data(atlog, AUDIO_THREAD_LOOP_SLEEP,
-					    sleep_ts->tv_nsec);
-	}
-
-	*ts = *sleep_ts;
+	get_next_stream_wake(thread, ts);
 
 	return 0;
 }
@@ -1957,7 +1963,7 @@ static int unified_io(struct audio_thread *thread, struct timespec *ts)
 static void *audio_io_thread(void *arg)
 {
 	struct audio_thread *thread = (struct audio_thread *)arg;
-	struct timespec ts;
+	struct timespec ts, now, wake_ts;
 	fd_set poll_set;
 	fd_set poll_write_set;
 	int msg_fd;
@@ -1980,9 +1986,11 @@ static void *audio_io_thread(void *arg)
 		    device_open(first_input_dev(thread)) ||
 		    device_open(first_loop_dev(thread))) {
 			/* device opened */
-			err = unified_io(thread, &ts);
+			err = unified_io(thread, &wake_ts);
 			if (err < 0)
 				syslog(LOG_ERR, "audio cb error %d", err);
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			subtract_timespecs(&wake_ts, &now, &ts);
 			wait_ts = &ts;
 		}
 
@@ -2001,7 +2009,9 @@ static void *audio_io_thread(void *arg)
 				max_fd = iodev_cb->fd;
 		}
 
-		audio_thread_event_log_tag(atlog, AUDIO_THREAD_SLEEP);
+		audio_thread_event_log_data2(atlog, AUDIO_THREAD_SLEEP,
+					     wait_ts ? wait_ts->tv_sec : 0,
+					     wait_ts ? wait_ts->tv_nsec : 0);
 		err = pselect(max_fd + 1, &poll_set, &poll_write_set, NULL,
 			      wait_ts, NULL);
 		audio_thread_event_log_tag(atlog, AUDIO_THREAD_WAKE);

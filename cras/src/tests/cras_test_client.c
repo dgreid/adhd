@@ -421,8 +421,9 @@ static int show_alog_tag(const uint32_t *log,
 		printf("WAKE: %u.%09u\n", arg0, arg1);
 		return 2;
 	case AUDIO_THREAD_SLEEP:
-		printf("SLEEP: %u.%09u\n", arg0, arg1);
-		return 2;
+		printf("SLEEP: %u.%09u %09d.%09d\n", arg0, arg1,
+		       (int)arg2, (int)arg3);
+		return 4;
 	case AUDIO_THREAD_READ_AUDIO:
 		printf("READ_AUDIO: %u.%09u hw_level: %u\n",
 		       arg0, arg1, arg2);
@@ -457,18 +458,6 @@ static int show_alog_tag(const uint32_t *log,
 		       "num_mixed %u\n",
 		       arg0, arg1, arg2, arg3);
 		return 4;
-	case AUDIO_THREAD_INPUT_SLEEP:
-		printf("INPUT_SLEEP: %u.%09u %09u\n", arg0,
-		       arg1, arg2);
-		return 3;
-	case AUDIO_THREAD_OUTPUT_SLEEP:
-		printf("OUTPUT_SLEEP: %u.%09u %09u\n", arg0,
-		       arg1, arg2);
-		return 3;
-	case AUDIO_THREAD_LOOP_SLEEP:
-		printf("LOOP_SLEEP: %u.%u %09u\n", arg0,
-		       arg1, arg2);
-		return 3;
 	case AUDIO_THREAD_WRITE_STREAMS_STREAM:
 		printf("WRITE_STREAMS_STREAM: %u.%09u id %x"
 		       "shm_frames %u cb_pending %u\n",
@@ -492,6 +481,21 @@ static int show_alog_tag(const uint32_t *log,
 		printf("A2DP_WRITE: %u.%09u written %d queued %u\n",
 		       arg0, arg1, (int16_t)arg2, arg3);
 		return 4;
+	case AUDIO_THREAD_STREAM_SLEEP_TIME:
+		printf("STREAM_SLEEP_TIME: %u.%09u id:%x wake:%09u.%09d\n",
+		       arg0, arg1, arg2, arg3, arg4);
+		return 5;
+	case AUDIO_THREAD_STREAM_SLEEP_ADJUST:
+		printf("STREAM_SLEEP_ADJUST: %u.%09u id:%x from:%09u.%09d\n",
+		       arg0, arg1, arg2, arg3, arg4);
+		return 5;
+	case AUDIO_THREAD_STREAM_SKIP_CB:
+		printf("STREAM_SKIP_CB: %u.%9u id %x\n", arg0, arg1, arg2);
+		return 3;
+	case AUDIO_THREAD_DEV_SLEEP_TIME:
+		printf("DEV_SLEEP_TIME: %u.%09u devidx:%x wake:%09u.%09d\n",
+		       arg0, arg1, arg2, arg3, arg4);
+		return 5;
 	default:
 		printf("Unknown alog tag %u\n", tag);
 		return -1;

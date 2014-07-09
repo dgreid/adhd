@@ -8,6 +8,7 @@
 
 #include <pthread.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 #include "cras_types.h"
 
@@ -24,6 +25,7 @@ enum error_type_from_audio_thread_h {
 /* Linked list of streams of audio from/to a client. */
 struct cras_io_stream {
 	struct cras_rstream *stream;
+	struct timespec next_cb_ts; /* When to call back for more data. */
 	int fd; /* cached here due to frequent access */
 	unsigned int skip_mix; /* Skip this stream next mix cycle. */
 	struct cras_io_stream *prev, *next;
@@ -32,6 +34,7 @@ struct cras_io_stream {
 /* List of active input/output devices. */
 struct active_dev {
 	struct cras_iodev *dev;
+	struct timespec wake_ts; /* When callback is needed to avoid xrun. */
 	struct active_dev *prev, *next;
 };
 
@@ -52,6 +55,8 @@ struct active_dev {
  *        that direction.
  *    buffer_frames - List of buffer frames used for each CRAS_STREAM_DIRECTION,
  *        0 means there's no stream attached for that direction.
+ *    drain_sleep - next time the thread should wake up to drain an output
+ *        device.
  */
 struct audio_thread {
 	int to_thread_fds[2];
@@ -64,6 +69,7 @@ struct audio_thread {
 	int devs_open[CRAS_NUM_DIRECTIONS];
 	unsigned int cb_threshold[CRAS_NUM_DIRECTIONS];
 	unsigned int buffer_frames[CRAS_NUM_DIRECTIONS];
+	struct timespec drain_sleep;
 };
 
 /* Callback function to be handled in main loop in audio thread.
