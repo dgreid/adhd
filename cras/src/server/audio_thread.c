@@ -422,6 +422,8 @@ static int append_stream(struct audio_thread *thread,
 		clock_gettime(CLOCK_MONOTONIC, &out->next_cb_ts);
 		cras_shm_buffer_written(cras_rstream_output_shm(stream),
 					stream->cb_threshold);
+		fetch_stream(thread, out, 0,
+			     first_output_dev(thread)->format->frame_rate);
 	} else {
 		struct timespec sleep_ts;
 		clock_gettime(CLOCK_MONOTONIC, &out->next_cb_ts);
@@ -1503,12 +1505,22 @@ static void get_next_stream_wake(struct audio_thread *thread,
 	DL_FOREACH(thread->active_devs[CRAS_STREAM_OUTPUT], adev) {
 		if (!device_open(adev->dev))
 			continue;
+		audio_thread_event_log_data3(atlog,
+					     AUDIO_THREAD_DEV_SLEEP_TIME,
+					     adev->dev->info.idx,
+					     adev->wake_ts.tv_sec,
+					     adev->wake_ts.tv_nsec);
 		if (timespec_after(min_ts, &adev->wake_ts))
 			*min_ts = adev->wake_ts;
 	}
 	DL_FOREACH(thread->active_devs[CRAS_STREAM_INPUT], adev) {
 		if (!device_open(adev->dev))
 			continue;
+		audio_thread_event_log_data3(atlog,
+					     AUDIO_THREAD_DEV_SLEEP_TIME,
+					     adev->dev->info.idx,
+					     adev->wake_ts.tv_sec,
+					     adev->wake_ts.tv_nsec);
 		if (timespec_after(min_ts, &adev->wake_ts))
 			*min_ts = adev->wake_ts;
 	}
@@ -1576,6 +1588,11 @@ static void set_odev_sleep_times(struct audio_thread *thread)
 
 	adjusted_level = adjust_level(thread, hw_level);
 	cb_threshold = thread->cb_threshold[CRAS_STREAM_OUTPUT];
+	audio_thread_event_log_data3(atlog,
+				     AUDIO_THREAD_SET_DEV_WAKE,
+				     adev->dev->info.idx,
+				     adjusted_level,
+				     cb_threshold);
 	if (adjusted_level > cb_threshold) {
 		struct timespec sleep_time;
 
@@ -1583,11 +1600,6 @@ static void set_odev_sleep_times(struct audio_thread *thread)
 				    adev->dev->format->frame_rate,
 				    &sleep_time);
 		add_timespecs(&adev->wake_ts, &sleep_time);
-		audio_thread_event_log_data3(atlog,
-					     AUDIO_THREAD_DEV_SLEEP_TIME,
-					     adev->dev->info.idx,
-					     adev->wake_ts.tv_sec,
-					     adev->wake_ts.tv_nsec);
 	}
 }
 

@@ -496,6 +496,10 @@ static int show_alog_tag(const uint32_t *log,
 		printf("DEV_SLEEP_TIME: %u.%09u devidx:%x wake:%09u.%09d\n",
 		       arg0, arg1, arg2, arg3, arg4);
 		return 5;
+	case AUDIO_THREAD_SET_DEV_WAKE:
+		printf("SET_DEV_WAKE: %u.%09u devidx:%x level:%u adj:%u\n",
+		       arg0, arg1, arg2, arg3, arg4);
+		return 5;
 	default:
 		printf("Unknown alog tag %u\n", tag);
 		return -1;
