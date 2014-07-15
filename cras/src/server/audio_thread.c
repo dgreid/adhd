@@ -366,6 +366,7 @@ static int fetch_stream(struct audio_thread *thread,
 			unsigned int fr_rate)
 {
 	struct cras_audio_shm *shm = cras_rstream_output_shm(curr->stream);
+	struct timespec ts;
 	int rc;
 
 	audio_thread_event_log_data(
@@ -391,6 +392,10 @@ static int fetch_stream(struct audio_thread *thread,
 		return 0;
 	}
 
+	/* Set the next timeout time. */
+	cras_frames_to_time(curr->stream->cb_threshold, fr_rate, &ts);
+	add_timespecs(&curr->next_cb_ts, &ts);
+
 	update_stream_timeout(shm);
 	cras_shm_clear_first_timeout(shm);
 	cras_shm_set_callback_pending(shm, 1);
@@ -414,6 +419,9 @@ static int append_stream(struct audio_thread *thread,
 	out->stream = stream;
 	out->fd = cras_rstream_get_audio_fd(stream);
 	DL_APPEND(thread->streams, out);
+
+	/* Set the time of the first callback(now). */
+	clock_gettime(CLOCK_MONOTONIC, &out->next_cb_ts);
 
 	return 0;
 }
@@ -1824,6 +1832,7 @@ int possibly_read_audio(struct audio_thread *thread,
 	DL_FOREACH(thread->streams, stream) {
 		struct cras_rstream *rstream;
 		unsigned int cb_threshold;
+		struct timespec sleep_ts;
 
 		rstream = stream->stream;
 
@@ -1846,6 +1855,10 @@ int possibly_read_audio(struct audio_thread *thread,
 		*min_sleep = MIN(*min_sleep, cb_threshold);
 
 		cras_shm_buffer_write_complete(shm);
+		cras_frames_to_time(stream->stream->cb_threshold,
+				    first_input_dev(thread)->format->frame_rate,
+				    &sleep_ts);
+		add_timespecs(&stream->next_cb_ts, &sleep_ts);
 
 		/* Tell the client that samples are ready. */
 		rc = cras_rstream_audio_ready(
