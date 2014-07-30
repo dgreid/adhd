@@ -1162,8 +1162,9 @@ static int write_streams(struct audio_thread *thread,
 			cras_shm_set_callback_pending(shm, 0);
 			rc = cras_rstream_get_audio_request_reply(curr->stream);
 			if (rc < 0) {
+				cras_rstream_set_is_draining(curr->stream, 1);
 				syslog(LOG_ERR,
-				       "fail to get audio request replay: %d",
+				       "fail to get audio request reply: %d",
 				       rc);
 				continue;
 			}
