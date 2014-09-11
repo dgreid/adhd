@@ -2098,6 +2098,7 @@ TEST_F(ActiveDevicesSuite, InputDelayFrames) {
   int fr;
   iodev_.direction = CRAS_STREAM_INPUT;
   iodev2_.direction = CRAS_STREAM_INPUT;
+  rstream_->direction = CRAS_STREAM_INPUT;
 
   thread_set_active_dev(thread_, &iodev_);
   thread_add_active_dev(thread_, &iodev2_);
