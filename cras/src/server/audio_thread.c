@@ -1569,7 +1569,7 @@ int drain_output_buffer(struct audio_thread *thread,
 	return 0;
 }
 
-static void set_odev_sleep_times(struct audio_thread *thread)
+static void set_odev_wake_times(struct audio_thread *thread)
 {
 	/* TODO(dgreid) - handle multiple outputs. */
 	struct active_dev *adev = thread->active_devs[CRAS_STREAM_OUTPUT];
@@ -1697,7 +1697,7 @@ int possibly_fill_audio(struct audio_thread *thread)
 		if (!odev->dev_running(odev))
 			return -1;
 
-	set_odev_sleep_times(thread);
+	set_odev_wake_times(thread);
 
 	audio_thread_event_log_data(atlog, AUDIO_THREAD_FILL_AUDIO_DONE,
 				    total_written, 0, 0);
