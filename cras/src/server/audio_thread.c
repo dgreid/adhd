@@ -1960,7 +1960,9 @@ static int unified_io(struct audio_thread *thread, struct timespec *ts)
 	/* TODO(dgreid) only want to wake for dev if it will be an underrun, and
 	 * then fill with zeros if there isn't any data in the stream. */
 	if (0) get_next_dev_wake(thread, &min_ts, &now);
-	subtract_timespecs(&min_ts, &now, ts);
+
+	if (timespec_after(&min_ts, &now))
+		subtract_timespecs(&min_ts, &now, ts);
 
 	return 0;
 }
