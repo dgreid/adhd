@@ -1494,6 +1494,36 @@ static void get_next_stream_wake(struct audio_thread *thread,
 	}
 }
 
+static void get_next_dev_wake(struct audio_thread *thread,
+			      struct timespec *min_ts,
+			      const struct timespec *now)
+{
+	struct active_dev *adev;
+
+	DL_FOREACH(thread->active_devs[CRAS_STREAM_OUTPUT], adev) {
+		if (!device_open(adev->dev))
+			continue;
+		audio_thread_event_log_data(atlog,
+					    AUDIO_THREAD_DEV_SLEEP_TIME,
+					    adev->dev->info.idx,
+					    adev->wake_ts.tv_sec,
+					    adev->wake_ts.tv_nsec);
+		if (timespec_after(min_ts, &adev->wake_ts))
+			*min_ts = adev->wake_ts;
+	}
+	DL_FOREACH(thread->active_devs[CRAS_STREAM_INPUT], adev) {
+		if (!device_open(adev->dev))
+			continue;
+		audio_thread_event_log_data(atlog,
+					    AUDIO_THREAD_DEV_SLEEP_TIME,
+					    adev->dev->info.idx,
+					    adev->wake_ts.tv_sec,
+					    adev->wake_ts.tv_nsec);
+		if (timespec_after(min_ts, &adev->wake_ts))
+			*min_ts = adev->wake_ts;
+	}
+}
+
 /* Drain the hardware buffer of odev.
  * Args:
  *    odev - the output device to be drainned.
@@ -1530,6 +1560,37 @@ int drain_output_buffer(struct audio_thread *thread,
 	odev->extra_silent_frames += filled_count;
 
 	return 0;
+}
+
+static void set_odev_sleep_times(struct audio_thread *thread)
+{
+	/* TODO(dgreid) - handle multiple outputs. */
+	struct active_dev *adev = thread->active_devs[CRAS_STREAM_OUTPUT];
+	int hw_level;
+	unsigned int adjusted_level;
+	unsigned int cb_threshold;
+
+	clock_gettime(CLOCK_MONOTONIC, &adev->wake_ts);
+
+	hw_level = adev->dev->frames_queued(adev->dev);
+	if (hw_level < 0)
+		return;
+
+	adjusted_level = adjust_level(thread, hw_level);
+	cb_threshold = thread->cb_threshold[CRAS_STREAM_OUTPUT];
+	audio_thread_event_log_data(atlog,
+				    AUDIO_THREAD_SET_DEV_WAKE,
+				    adev->dev->info.idx,
+				    adjusted_level,
+				    cb_threshold);
+	if (adjusted_level > cb_threshold) {
+		struct timespec sleep_time;
+
+		cras_frames_to_time(adjusted_level - cb_threshold,
+				    adev->dev->format->frame_rate,
+				    &sleep_time);
+		add_timespecs(&adev->wake_ts, &sleep_time);
+	}
 }
 
 /* Transfer samples from clients to the audio device.
@@ -1629,6 +1690,7 @@ int possibly_fill_audio(struct audio_thread *thread)
 		if (!odev->dev_running(odev))
 			return -1;
 
+	set_odev_sleep_times(thread);
 
 	audio_thread_event_log_data(atlog, AUDIO_THREAD_FILL_AUDIO_DONE,
 				    total_written, 0, 0);
@@ -1888,6 +1950,9 @@ static int unified_io(struct audio_thread *thread, struct timespec *ts)
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	add_timespecs(&min_ts, &now);
 	get_next_stream_wake(thread, &min_ts, &now);
+	/* TODO(dgreid) only want to wake for dev if it will be an underrun, and
+	 * then fill with zeros if there isn't any data in the stream. */
+	if (0) get_next_dev_wake(thread, &min_ts, &now);
 	subtract_timespecs(&min_ts, &now, ts);
 
 	return 0;

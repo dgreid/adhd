@@ -34,6 +34,7 @@ struct cras_io_stream {
 /* List of active input/output devices. */
 struct active_dev {
 	struct cras_iodev *dev;
+	struct timespec wake_ts; /* When callback is needed to avoid xrun. */
 	struct active_dev *prev, *next;
 };
 

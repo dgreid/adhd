@@ -474,6 +474,14 @@ static void show_alog_tag(const struct audio_thread_event_log *log,
 	case AUDIO_THREAD_STREAM_SKIP_CB:
 		printf("STREAM_SKIP_CB: %u.%9u id %x\n", sec, nsec, data1);
 		break;
+	case AUDIO_THREAD_DEV_SLEEP_TIME:
+		printf("DEV_SLEEP_TIME: %u.%09u devidx:%x wake:%09u.%09d\n",
+		       sec, nsec, data1, data2, data3);
+		break;
+	case AUDIO_THREAD_SET_DEV_WAKE:
+		printf("SET_DEV_WAKE: %u.%09u devidx:%x adj:%u cbth:%u\n",
+		       sec, nsec, data1, data2, data3);
+		break;
 	default:
 		printf("Unknown alog tag %u\n", tag);
 		break;
