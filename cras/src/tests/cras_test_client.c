@@ -437,8 +437,8 @@ static void show_alog_tag(const struct audio_thread_event_log *log,
 		break;
 	case AUDIO_THREAD_WRITE_STREAMS_MIXED:
 		printf("WRITE_STREAMS_MIXED: %u.%09u write_limit %u "
-		       "num_mixed %u\n",
-		       sec, nsec, data1, data2);
+		       "num_mixed %u level %u\n",
+		       sec, nsec, data1, data2, data3);
 		break;
 	case AUDIO_THREAD_WRITE_STREAMS_STREAM:
 		printf("WRITE_STREAMS_STREAM: %u.%09u id %x "
@@ -472,7 +472,8 @@ static void show_alog_tag(const struct audio_thread_event_log *log,
 		       sec, nsec, data1, data2, data3);
 		break;
 	case AUDIO_THREAD_STREAM_SKIP_CB:
-		printf("STREAM_SKIP_CB: %u.%9u id %x\n", sec, nsec, data1);
+		printf("STREAM_SKIP_CB: %u.%9u id %x write offsets %u %u\n",
+		       sec, nsec, data1, data2, data3);
 		break;
 	case AUDIO_THREAD_DEV_SLEEP_TIME:
 		printf("DEV_SLEEP_TIME: %u.%09u devidx:%x wake:%09u.%09d\n",

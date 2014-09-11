@@ -1000,7 +1000,9 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 		} else {
 			audio_thread_event_log_data(
 					atlog, AUDIO_THREAD_STREAM_SKIP_CB,
-					curr->stream->stream_id, 0, 0);
+					curr->stream->stream_id,
+					shm->area->write_offset[0],
+					shm->area->write_offset[1]);
 		}
 	}
 
@@ -1232,7 +1234,7 @@ static int write_streams(struct audio_thread *thread,
 	}
 
 	audio_thread_event_log_data(atlog, AUDIO_THREAD_WRITE_STREAMS_MIXED,
-				    write_limit, num_mixed, 0);
+				    write_limit, num_mixed, level);
 	if (num_mixed == 0)
 		return num_mixed;
 
