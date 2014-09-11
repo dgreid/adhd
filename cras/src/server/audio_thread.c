@@ -423,6 +423,12 @@ static int append_stream(struct audio_thread *thread,
 	/* Set the time of the first callback(now). */
 	clock_gettime(CLOCK_MONOTONIC, &out->next_cb_ts);
 
+	if (stream_uses_output(stream)) {
+		struct cras_audio_shm *shm = cras_rstream_output_shm(stream);
+		cras_shm_buffer_written(shm, stream->cb_threshold);
+		cras_shm_buffer_write_complete(shm);
+	}
+
 	return 0;
 }
 
@@ -826,7 +832,6 @@ static int thread_add_stream(struct audio_thread *thread,
 		 * This avoids a burst of audio callbacks when the stream starts
 		 */
 		config_devices_min_latency(thread, CRAS_STREAM_OUTPUT);
-		fill_odevs_zeros_cb_threshold(thread);
 
 		if (loop_dev) {
 			struct cras_io_stream *iostream;
