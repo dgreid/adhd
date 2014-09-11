@@ -403,7 +403,8 @@ static void show_alog_tag(const struct audio_thread_event_log *log,
 		printf("WAKE: %u.%09u\n", sec, nsec);
 		break;
 	case AUDIO_THREAD_SLEEP:
-		printf("SLEEP: %u.%09u\n", sec, nsec);
+		printf("SLEEP: %u.%09u %09d.%09d\n", sec, nsec,
+		       (int)data1, (int)data2);
 		break;
 	case AUDIO_THREAD_READ_AUDIO:
 		printf("READ_AUDIO: %u.%09u hw_level: %u\n",
@@ -439,18 +440,6 @@ static void show_alog_tag(const struct audio_thread_event_log *log,
 		       "num_mixed %u\n",
 		       sec, nsec, data1, data2);
 		break;
-	case AUDIO_THREAD_INPUT_SLEEP:
-		printf("INPUT_SLEEP: %u.%09u %09u\n", sec,
-		       nsec, data1);
-		break;
-	case AUDIO_THREAD_OUTPUT_SLEEP:
-		printf("OUTPUT_SLEEP: %u.%09u %09u\n", sec,
-		       nsec, data1);
-		break;
-	case AUDIO_THREAD_LOOP_SLEEP:
-		printf("LOOP_SLEEP: %u.%u %09u\n", sec,
-		       nsec, data1);
-		break;
 	case AUDIO_THREAD_WRITE_STREAMS_STREAM:
 		printf("WRITE_STREAMS_STREAM: %u.%09u id %x "
 		       "shm_frames %u cb_pending %u\n",
@@ -473,6 +462,17 @@ static void show_alog_tag(const struct audio_thread_event_log *log,
 	case AUDIO_THREAD_A2DP_WRITE:
 		printf("A2DP_WRITE: %u.%09u written %d queued %u\n",
 		       sec, nsec, data1, data2);
+		break;
+	case AUDIO_THREAD_STREAM_SLEEP_TIME:
+		printf("STREAM_SLEEP_TIME: %u.%09u id:%x wake:%09u.%09d\n",
+		       sec, nsec, data1, data2, data3);
+		break;
+	case AUDIO_THREAD_STREAM_SLEEP_ADJUST:
+		printf("STREAM_SLEEP_ADJUST: %u.%09u id:%x from:%09u.%09d\n",
+		       sec, nsec, data1, data2, data3);
+		break;
+	case AUDIO_THREAD_STREAM_SKIP_CB:
+		printf("STREAM_SKIP_CB: %u.%9u id %x\n", sec, nsec, data1);
 		break;
 	default:
 		printf("Unknown alog tag %u\n", tag);

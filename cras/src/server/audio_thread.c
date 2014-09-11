@@ -992,6 +992,10 @@ static int fetch_and_set_timestamp(struct audio_thread *thread,
 					  fr_rate);
 			if (rc < 0)
 				return rc;
+		} else {
+			audio_thread_event_log_data(
+					atlog, AUDIO_THREAD_STREAM_SKIP_CB,
+					curr->stream->stream_id, 0, 0);
 		}
 	}
 
@@ -1471,9 +1475,20 @@ static void get_next_stream_wake(struct audio_thread *thread,
 		/* Make sure the sleep time isn't negative. If we've missed the
 		 * wake up for a stream correct the next time to now. */
 		if (timespec_after(now, &curr->next_cb_ts)) {
+			audio_thread_event_log_data(
+					atlog,
+					AUDIO_THREAD_STREAM_SLEEP_ADJUST,
+					curr->stream->stream_id,
+					curr->next_cb_ts.tv_sec,
+					curr->next_cb_ts.tv_nsec);
 			curr->next_cb_ts = *now;
 		}
 
+		audio_thread_event_log_data(atlog,
+					    AUDIO_THREAD_STREAM_SLEEP_TIME,
+					    curr->stream->stream_id,
+					    curr->next_cb_ts.tv_sec,
+					    curr->next_cb_ts.tv_nsec);
 		if (timespec_after(min_ts, &curr->next_cb_ts))
 			*min_ts = curr->next_cb_ts;
 	}
@@ -1932,7 +1947,9 @@ static void *audio_io_thread(void *arg)
 				max_fd = iodev_cb->fd;
 		}
 
-		audio_thread_event_log_data(atlog, AUDIO_THREAD_SLEEP, 0, 0, 0);
+		audio_thread_event_log_data(atlog, AUDIO_THREAD_SLEEP,
+					    wait_ts ? wait_ts->tv_sec : 0,
+					    wait_ts ? wait_ts->tv_nsec : 0, 0);
 		err = pselect(max_fd + 1, &poll_set, &poll_write_set, NULL,
 			      wait_ts, NULL);
 		audio_thread_event_log_data(atlog, AUDIO_THREAD_WAKE, 0, 0, 0);
