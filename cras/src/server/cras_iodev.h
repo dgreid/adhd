@@ -125,9 +125,9 @@ struct cras_iodev {
 	const char *dsp_name;
 	int is_active;
 	int software_volume_needed;
-	struct cras_iodev *prev, *next;
 	int is_draining;
 	size_t extra_silent_frames;
+	struct cras_iodev *prev, *next;
 };
 
 /*

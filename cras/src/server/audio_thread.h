@@ -11,6 +11,7 @@
 
 #include "cras_types.h"
 
+struct buffer_share;
 struct cras_iodev;
 struct cras_rstream;
 struct dev_stream;
@@ -26,10 +27,13 @@ enum error_type_from_audio_thread_h {
 /* List of active input/output devices.
  *    dev - The device.
  *    streams - List of audio streams serviced by dev.
+ *    buff_state - If multiple streams are writing to this device, then this
+ *      keeps track of how much each stream has written.
  */
 struct active_dev {
 	struct cras_iodev *dev;
 	struct dev_stream *streams;
+	struct buffer_share *buff_state;
 	struct timespec wake_ts; /* When callback is needed to avoid xrun. */
 	unsigned int min_cb_level;
 	unsigned int max_cb_level;

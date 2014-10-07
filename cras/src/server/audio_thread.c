@@ -12,6 +12,7 @@
 
 #include "cras_audio_area.h"
 #include "audio_thread_log.h"
+#include "buffer_share.h"
 #include "cras_config.h"
 #include "cras_dsp.h"
 #include "cras_dsp_pipeline.h"
@@ -418,6 +419,7 @@ static int append_stream_to_dev(struct audio_thread *thread,
 	adev->min_cb_level = MIN(adev->min_cb_level, stream->cb_threshold);
 	adev->max_cb_level = MAX(adev->max_cb_level, stream->cb_threshold);
 
+	buffer_share_add_dev(adev->buff_state, stream->stream_id);
 	return 0;
 }
 
@@ -493,6 +495,7 @@ static int delete_stream(struct audio_thread *thread,
 		DL_FOREACH(adev->streams, out) {
 			if (out->stream == stream) {
 				DL_DELETE(adev->streams, out);
+				buffer_share_rm_dev(adev->buff_state, stream->stream_id);
 				dev_stream_destroy(out);
 				continue;
 			}
@@ -536,6 +539,7 @@ static void thread_clear_active_devs(struct audio_thread *thread,
 			close_device(adev->dev);
 		DL_DELETE(thread->active_devs[dir], adev);
 		adev->dev->is_active = 0;
+		buffer_share_destroy(adev->buff_state);
 		free(adev);
 	}
 }
@@ -555,6 +559,7 @@ static void move_streams_to_added_dev(struct audio_thread *thread,
 
 			if (adev == fallback_dev) {
 				DL_DELETE(adev->streams, dev_stream);
+				buffer_share_rm_dev(adev->buff_state, dev_stream->stream->stream_id);
 				dev_stream_destroy(dev_stream);
 			}
 		}
@@ -586,6 +591,8 @@ static void thread_add_active_dev(struct audio_thread *thread,
 	}
 	adev = (struct active_dev *)calloc(1, sizeof(*adev));
 	adev->dev = iodev;
+	/* TODO(dgreid) - move to iodev so aren't newing on audio thread. */
+	adev->buff_state = buffer_share_create(iodev->buffer_size);
 	iodev->is_active = 1;
 
 	audio_thread_event_log_data(atlog,
@@ -624,9 +631,11 @@ static void thread_rm_active_adev(struct audio_thread *thread,
 			append_stream_to_dev(thread, fallback_dev,
 					     dev_stream->stream);
 		DL_DELETE(adev->streams, dev_stream);
+		buffer_share_rm_dev(adev->buff_state, dev_stream->stream->stream_id);
 		dev_stream_destroy(dev_stream);
 	}
 
+	buffer_share_destroy(adev->buff_state);
 	free(adev);
 }
 
@@ -916,10 +925,17 @@ static int write_streams(struct audio_thread *thread,
 				    write_limit, 0, 0);
 
 	DL_FOREACH(adev->streams, curr) {
-		if (dev_stream_mix(curr, odev->format->num_channels, dst,
-				   write_limit, &num_mixed) < 0)
+		unsigned int nwritten;
+		nwritten = dev_stream_mix(curr, odev->format->num_channels, dst,
+					  write_limit, &num_mixed);
+		if (nwritten < 0) {
 			thread_remove_stream(thread, curr->stream);
+			continue;
+		}
+		buffer_share_offset_update(adev->buff_state, curr->stream->stream_id, nwritten);
 	}
+
+	write_limit = buffer_share_get_new_write_point(adev->buff_state);
 
 	audio_thread_event_log_data(atlog, AUDIO_THREAD_WRITE_STREAMS_MIXED,
 				    write_limit, num_mixed, 0);
