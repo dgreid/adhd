@@ -105,6 +105,55 @@ static void mix_stereo_init_module(struct dsp_module *module)
 }
 
 /*
+ *  tomono module functions
+ */
+struct tomono_data {
+	float *ports[3]; /* Two ports for input, one for output */
+};
+
+static int tomono_instantiate(struct dsp_module *module,
+			      unsigned long sample_rate)
+{
+	printf("%s\n", __func__);
+	module->data = calloc(1, sizeof(struct tomono_data));
+	return 0;
+}
+
+static void tomono_connect_port(struct dsp_module *module,
+			    unsigned long port, float *data_location)
+{
+	struct tomono_data *data = (struct tomono_data *) module->data;
+	data->ports[port] = data_location;
+	printf("%s %lu = %p\n", __func__, port, data_location);
+}
+
+static void tomono_run(struct dsp_module *module, unsigned long sample_count)
+{
+	struct tomono_data *data = (struct tomono_data *) module->data;
+	if (data->ports[1] != data->ports[2])
+		memcpy(data->ports[2], data->ports[1],
+		       sizeof(float) * sample_count);
+}
+
+static void tomono_deinstantiate(struct dsp_module *module)
+{
+	struct tomono_data *data = (struct tomono_data *) module->data;
+	free(data);
+}
+
+static void tomono_init_module(struct dsp_module *module)
+{
+	module->instantiate = &tomono_instantiate;
+	module->connect_port = &tomono_connect_port;
+	module->get_delay = &empty_get_delay;
+	module->run = &tomono_run;
+	module->deinstantiate = &tomono_deinstantiate;
+	module->free_module = &empty_free_module;
+	module->get_properties = &empty_get_properties;
+	module->dump = &empty_dump;
+}
+
+/*
  *  eq module functions
  */
 struct eq_data {
@@ -376,6 +425,8 @@ struct dsp_module *cras_dsp_module_load_builtin(struct plugin *plugin)
 		eq2_init_module(module);
 	} else if (strcmp(plugin->label, "drc") == 0) {
 		drc_init_module(module);
+	} else if (strcmp(plugin->label, "tomono") == 0) {
+		tomono_init_module(module);
 	} else {
 		empty_init_module(module);
 	}
