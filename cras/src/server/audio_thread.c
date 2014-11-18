@@ -389,6 +389,11 @@ static int init_device(struct active_dev *adev)
 static void thread_rm_active_adev(struct audio_thread *thread,
 				  struct active_dev *adev);
 
+static inline int output_adev(const struct active_dev *adev)
+{
+	return adev->dev->direction == CRAS_STREAM_OUTPUT;
+}
+
 static int append_stream_to_dev(struct audio_thread *thread,
 				struct active_dev *adev,
 				struct cras_rstream *stream)
@@ -396,6 +401,7 @@ static int append_stream_to_dev(struct audio_thread *thread,
 	struct dev_stream *out;
 	struct cras_audio_format fmt;
 	struct cras_iodev *dev = adev->dev;
+	struct cras_dsp_context *ctx = dev->dsp_context;
 	int rc;
 
 	if (dev->format == NULL) {
@@ -406,7 +412,14 @@ static int append_stream_to_dev(struct audio_thread *thread,
 			return rc;
 		}
 	}
-	out = dev_stream_create(stream, dev->info.idx, dev->format, dev);
+	fmt = *dev->format;
+	if (ctx) {
+		if (output_adev(adev))
+			fmt.num_channels = cras_dsp_num_input_channels(ctx);
+		else
+			fmt.num_channels = cras_dsp_num_output_channels(ctx);
+	}
+	out = dev_stream_create(stream, dev->info.idx, &fmt, dev);
 	if (!out)
 		return -EINVAL;
 

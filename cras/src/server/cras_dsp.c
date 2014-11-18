@@ -353,6 +353,16 @@ void cras_dsp_dump_info()
 	send_dsp_request_simple(DSP_CMD_DUMP_INFO, NULL);
 }
 
+unsigned int cras_dsp_num_output_channels(const struct cras_dsp_context *ctx)
+{
+	return ctx->channels;
+}
+
+unsigned int cras_dsp_num_input_channels(const struct cras_dsp_context *ctx)
+{
+	return ctx->channels;
+}
+
 void cras_dsp_sync()
 {
 	sem_t finished;
