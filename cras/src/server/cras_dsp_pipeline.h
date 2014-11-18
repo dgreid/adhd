@@ -76,7 +76,8 @@ void cras_dsp_pipeline_deinstantiate(struct pipeline *pipeline);
 int cras_dsp_pipeline_get_delay(struct pipeline *pipeline);
 
 /* Returns the number of input/output audio channels this pipeline expects */
-int cras_dsp_pipeline_get_num_channels(struct pipeline *pipeline);
+int cras_dsp_pipeline_get_num_input_channels(struct pipeline *pipeline);
+int cras_dsp_pipeline_get_num_output_channels(struct pipeline *pipeline);
 
 /* Returns the pointer to the input buffer for a channel of this
  * pipeline. The size of the buffer is DSP_BUFFER_SIZE samples, and

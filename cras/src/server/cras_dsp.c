@@ -102,9 +102,10 @@ static struct pipeline *prepare_pipeline(struct cras_dsp_context *ctx)
 		goto bail;
 	}
 
-	if (cras_dsp_pipeline_get_num_channels(pipeline) != ctx->channels) {
+	if (cras_dsp_pipeline_get_num_input_channels(pipeline) !=
+	    ctx->channels) {
 		syslog(LOG_ERR, "pipeline channel count mismatch (%d vs %d)",
-		       cras_dsp_pipeline_get_num_channels(pipeline),
+		       cras_dsp_pipeline_get_num_input_channels(pipeline),
 		       ctx->channels);
 		goto bail;
 	}
@@ -355,12 +356,12 @@ void cras_dsp_dump_info()
 
 unsigned int cras_dsp_num_output_channels(const struct cras_dsp_context *ctx)
 {
-	return ctx->channels;
+	return cras_dsp_pipeline_get_num_output_channels(ctx->pipeline);
 }
 
 unsigned int cras_dsp_num_input_channels(const struct cras_dsp_context *ctx)
 {
-	return ctx->channels;
+	return cras_dsp_pipeline_get_num_input_channels(ctx->pipeline);
 }
 
 void cras_dsp_sync()

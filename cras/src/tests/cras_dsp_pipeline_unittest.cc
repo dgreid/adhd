@@ -271,7 +271,7 @@ TEST_F(DspPipelineTestSuite, Simple) {
   ASSERT_TRUE(m1);
   ASSERT_TRUE(m2);
 
-  ASSERT_EQ(1, cras_dsp_pipeline_get_num_channels(p));
+  ASSERT_EQ(1, cras_dsp_pipeline_get_num_input_channels(p));
   ASSERT_EQ(0, cras_dsp_pipeline_instantiate(p, 48000));
 
   struct data *d1 = (struct data *)m1->data;
@@ -433,7 +433,7 @@ TEST_F(DspPipelineTestSuite, Complex) {
   ASSERT_TRUE(m5);
   ASSERT_FALSE(find_module("m6"));
 
-  ASSERT_EQ(2, cras_dsp_pipeline_get_num_channels(p));
+  ASSERT_EQ(2, cras_dsp_pipeline_get_num_input_channels(p));
   ASSERT_EQ(0, cras_dsp_pipeline_instantiate(p, 48000));
 
   struct data *d0 = (struct data *)m0->data;
