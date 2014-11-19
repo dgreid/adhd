@@ -13,13 +13,10 @@
 #include "cras_audio_area.h"
 #include "audio_thread_log.h"
 #include "cras_config.h"
-#include "cras_dsp.h"
-#include "cras_dsp_pipeline.h"
 #include "cras_fmt_conv.h"
 #include "cras_iodev.h"
 #include "cras_loopback_iodev.h"
 #include "cras_metrics.h"
-#include "cras_mix.h"
 #include "cras_rstream.h"
 #include "cras_server_metrics.h"
 #include "cras_system_state.h"
@@ -336,10 +333,10 @@ static int fill_odev_zeros(struct active_dev *adev, unsigned int frames)
 	int rc;
 	struct cras_iodev *odev = adev->dev;
 
-	frame_bytes = cras_get_format_bytes(odev->hw_format);
+	frame_bytes = cras_get_format_bytes(odev->format);
 	while (frames > 0) {
 		frames_written = frames;
-		rc = cras_iodev_get_buffer(odev, &area, &frames_written);
+		rc = cras_iodev_get_output_buffer(odev, &area, &frames_written);
 		if (rc < 0) {
 			syslog(LOG_ERR, "fill zeros fail: %d", rc);
 			return rc;
@@ -347,7 +344,8 @@ static int fill_odev_zeros(struct active_dev *adev, unsigned int frames)
 		/* This assumes consecutive channel areas. */
 		memset(area->channels[0].buf, 0,
 		       frames_written * frame_bytes);
-		cras_iodev_put_buffer(odev, frames_written);
+		cras_iodev_put_output_buffer(odev, area->channels[0].buf,
+					     frames_written);
 		frames -= frames_written;
 	}
 
@@ -403,7 +401,7 @@ static int append_stream_to_dev(struct audio_thread *thread,
 	struct cras_iodev *dev = adev->dev;
 	int rc;
 
-	if (dev->hw_format == NULL) {
+	if (dev->format == NULL) {
 		fmt = stream->format;
 		rc = cras_iodev_set_format(dev, &fmt);
 		if (rc) {
@@ -761,46 +759,6 @@ static int thread_add_stream(struct audio_thread *thread,
 	return 0;
 }
 
-static void apply_dsp(struct cras_iodev *iodev, uint8_t *buf, size_t frames)
-{
-	struct cras_dsp_context *ctx;
-	struct pipeline *pipeline;
-
-	ctx = iodev->dsp_context;
-	if (!ctx)
-		return;
-
-	pipeline = cras_dsp_get_pipeline(ctx);
-	if (!pipeline)
-		return;
-
-	cras_dsp_pipeline_apply(pipeline,
-				buf,
-				frames);
-
-	cras_dsp_put_pipeline(ctx);
-}
-
-static int get_dsp_delay(struct cras_iodev *iodev)
-{
-	struct cras_dsp_context *ctx;
-	struct pipeline *pipeline;
-	int delay;
-
-	ctx = iodev->dsp_context;
-	if (!ctx)
-		return 0;
-
-	pipeline = cras_dsp_get_pipeline(ctx);
-	if (!pipeline)
-		return 0;
-
-	delay = cras_dsp_pipeline_get_delay(pipeline);
-
-	cras_dsp_put_pipeline(ctx);
-	return delay;
-}
-
 /* Reads any pending audio message from the socket. */
 static void flush_old_aud_messages(struct cras_audio_shm *shm, int fd)
 {
@@ -837,10 +795,9 @@ static int fetch_streams(struct audio_thread *thread,
 	int rc;
 	int delay;
 
-	delay = odev->delay_frames(odev);
+	delay = cras_iodev_delay_frames(odev);
 	if (delay < 0)
 		return delay;
-	delay += get_dsp_delay(odev);
 
 	DL_FOREACH(adev->dev->streams, dev_stream) {
 		struct cras_rstream *rstream = dev_stream->stream;
@@ -1010,8 +967,7 @@ static int input_delay_frames(struct active_dev *adevs)
 	int max_delay = 0;
 
 	DL_FOREACH(adevs, adev) {
-		delay = adev->dev->delay_frames(adev->dev) +
-				get_dsp_delay(adev->dev);
+		delay = cras_iodev_delay_frames(adev->dev);
 		if (delay < 0)
 			return delay;
 		if (delay > max_delay)
@@ -1403,7 +1359,7 @@ static int write_output_samples(struct audio_thread *thread,
 	 * partial area to write to from mmap_begin */
 	while (total_written < fr_to_req) {
 		frames = fr_to_req - total_written;
-		rc = cras_iodev_get_buffer(odev, &area, &frames);
+		rc = cras_iodev_get_output_buffer(odev, &area, &frames);
 		if (rc < 0)
 			return rc;
 
@@ -1420,22 +1376,7 @@ static int write_output_samples(struct audio_thread *thread,
 
 		//loopback_iodev_add_audio(loop_dev, dst, written);
 
-		if (cras_system_get_mute()) {
-			unsigned int frame_bytes;
-			frame_bytes = cras_get_format_bytes(odev->hw_format);
-			cras_mix_mute_buffer(dst, frame_bytes, written);
-		} else {
-			apply_dsp(odev, dst, written);
-		}
-
-		if (cras_iodev_software_volume_needed(odev)) {
-			cras_scale_buffer(
-				(int16_t *)dst,
-				written * odev->hw_format->num_channels,
-				cras_iodev_get_software_volume_scaler(odev));
-		}
-
-		rc = cras_iodev_put_buffer(odev, written);
+		rc = cras_iodev_put_output_buffer(odev, dst, written);
 		if (rc < 0)
 			return rc;
 		total_written += written;
@@ -1531,7 +1472,6 @@ static int capture_to_streams(struct audio_thread *thread,
 			      unsigned int dev_index)
 {
 	struct cras_iodev *idev = adev->dev;
-	unsigned int frame_bytes = cras_get_format_bytes(idev->hw_format);
 	snd_pcm_uframes_t remainder, hw_level;
 
 	hw_level = idev->frames_queued(idev);
@@ -1549,22 +1489,14 @@ static int capture_to_streams(struct audio_thread *thread,
 	while (remainder > 0) {
 		struct cras_audio_area *area;
 		struct dev_stream *stream;
-		uint8_t *hw_buffer;
 		unsigned int nread, total_read;
 		int rc;
 
 		nread = remainder;
 
-		rc = cras_iodev_get_buffer(idev, &area, &nread);
+		rc = cras_iodev_get_input_buffer(idev, &area, &nread);
 		if (rc < 0 || nread == 0)
 			return rc;
-		/* TODO(dgreid) - This assumes interleaved audio. */
-		hw_buffer = area->channels[0].buf;
-
-		if (cras_system_get_capture_mute())
-			cras_mix_mute_buffer(hw_buffer, frame_bytes, nread);
-		else
-			apply_dsp(idev, hw_buffer, nread); /* TODO-applied 2x */
 
 		DL_FOREACH(adev->dev->streams, stream) {
 			unsigned int this_read;
@@ -1577,7 +1509,7 @@ static int capture_to_streams(struct audio_thread *thread,
 		}
 		total_read = cras_iodev_all_streams_written(idev);
 
-		rc = cras_iodev_put_buffer(idev, total_read);
+		rc = cras_iodev_put_input_buffer(idev, total_read);
 		if (rc < 0)
 			return rc;
 		remainder -= nread;

@@ -182,7 +182,6 @@ TESTS = \
 	loopback_iodev_unittest \
 	mix_unittest \
 	linear_resampler_unittest \
-	rate_estimator_unittest \
 	rclient_unittest \
 	rstream_unittest \
 	shm_unittest \

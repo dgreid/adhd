@@ -59,7 +59,7 @@ static int update_supported_formats(struct cras_iodev *iodev)
 	cras_bt_transport_configuration(a2dpio->transport, &a2dp,
 					sizeof(a2dp));
 
-	iodev->hw_format->format = SND_PCM_FORMAT_S16_LE;
+	iodev->format->format = SND_PCM_FORMAT_S16_LE;
 	channel = (a2dp.channel_mode == SBC_CHANNEL_MODE_MONO) ? 1 : 2;
 
 	if (a2dp.frequency & SBC_SAMPLING_FREQ_48000)
@@ -110,7 +110,7 @@ static int bt_queued_frames(const struct cras_iodev *iodev, int fr)
 	/* Calculate consumed frames since device has opened */
 	a2dpio->bt_written_frames += fr;
 	consumed = frames_since(a2dpio->dev_open_time,
-				iodev->hw_format->frame_rate);
+				iodev->format->frame_rate);
 
 	if (a2dpio->bt_written_frames > consumed)
 		return a2dpio->bt_written_frames - consumed;
@@ -124,7 +124,7 @@ static int frames_queued(const struct cras_iodev *iodev)
 	struct a2dp_io *a2dpio = (struct a2dp_io *)iodev;
 	unsigned int n = MAX(bt_queued_frames(iodev, 0),
 			     buf_queued_bytes(a2dpio->pcm_buf) /
-				cras_get_format_bytes(iodev->hw_format));
+				cras_get_format_bytes(iodev->format));
 
 	return MIN(iodev->buffer_size, n);
 }
@@ -142,9 +142,9 @@ static int open_dev(struct cras_iodev *iodev)
 	}
 
 	/* Assert format is set before opening device. */
-	if (iodev->hw_format == NULL)
+	if (iodev->format == NULL)
 		return -EINVAL;
-	cras_iodev_init_audio_area(iodev, iodev->hw_format->num_channels);
+	cras_iodev_init_audio_area(iodev, iodev->format->num_channels);
 
 	a2dpio->pcm_buf = byte_buffer_create(PCM_BUF_MAX_SIZE_BYTES);
 	if (!a2dpio->pcm_buf)
@@ -156,7 +156,7 @@ static int open_dev(struct cras_iodev *iodev)
 	a2dpio->pre_fill_complete = 0;
 	buf_increment_write(a2dpio->pcm_buf,
 			    iodev->min_buffer_level *
-				cras_get_format_bytes(iodev->hw_format));
+				cras_get_format_bytes(iodev->format));
 
 	/* Initialize variables for bt_queued_frames() */
 	a2dpio->bt_written_frames = 0;
@@ -217,7 +217,7 @@ static int pre_fill_socket(struct a2dp_io *a2dpio)
 				&a2dpio->a2dp,
 				zero_buffer,
 				sizeof(zero_buffer),
-				cras_get_format_bytes(a2dpio->base.hw_format),
+				cras_get_format_bytes(a2dpio->base.format),
 				cras_bt_transport_write_mtu(a2dpio->transport));
 		if (processed < 0)
 			return processed;
@@ -253,7 +253,7 @@ static int flush_data(void *arg)
 	struct a2dp_io *a2dpio;
 
 	a2dpio = (struct a2dp_io *)iodev;
-	format_bytes = cras_get_format_bytes(iodev->hw_format);
+	format_bytes = cras_get_format_bytes(iodev->format);
 
 encode_more:
 	while (buf_queued_bytes(a2dpio->pcm_buf)) {
@@ -317,7 +317,7 @@ static int delay_frames(const struct cras_iodev *iodev)
 	/* The number of frames in the pcm buffer plus two mtu packets */
 	return frames_queued(iodev)
 		+ 2 * cras_bt_transport_write_mtu(a2dpio->transport) /
-			cras_get_format_bytes(iodev->hw_format);
+			cras_get_format_bytes(iodev->format);
 }
 
 static int get_buffer(struct cras_iodev *iodev,
@@ -329,7 +329,7 @@ static int get_buffer(struct cras_iodev *iodev,
 
 	a2dpio = (struct a2dp_io *)iodev;
 
-	format_bytes = cras_get_format_bytes(iodev->hw_format);
+	format_bytes = cras_get_format_bytes(iodev->format);
 
 	if (iodev->direction != CRAS_STREAM_OUTPUT)
 		return 0;
@@ -338,7 +338,7 @@ static int get_buffer(struct cras_iodev *iodev,
 					format_bytes);
 	iodev->area->frames = *frames;
 	cras_audio_area_config_buf_pointers(
-			iodev->area, iodev->hw_format,
+			iodev->area, iodev->format,
 			buf_write_pointer(a2dpio->pcm_buf));
 	*area = iodev->area;
 	return 0;
@@ -350,7 +350,7 @@ static int put_buffer(struct cras_iodev *iodev, unsigned nwritten)
 	size_t format_bytes;
 	struct a2dp_io *a2dpio = (struct a2dp_io *)iodev;
 
-	format_bytes = cras_get_format_bytes(iodev->hw_format);
+	format_bytes = cras_get_format_bytes(iodev->format);
 	written_bytes = nwritten * format_bytes;
 
 	if (written_bytes > buf_writable_bytes(a2dpio->pcm_buf))

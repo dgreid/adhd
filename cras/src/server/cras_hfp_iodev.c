@@ -25,7 +25,7 @@ struct hfp_io {
 static int update_supported_formats(struct cras_iodev *iodev)
 {
 	// 16 bit, mono, 8kHz
-	iodev->hw_format->format = SND_PCM_FORMAT_S16_LE;
+	iodev->format->format = SND_PCM_FORMAT_S16_LE;
 
 	free(iodev->supported_rates);
 	iodev->supported_rates = (size_t *)malloc(2 * sizeof(size_t));
@@ -56,9 +56,9 @@ static int open_dev(struct cras_iodev *iodev)
 	int sk, err;
 
 	/* Assert format is set before opening device. */
-	if (iodev->hw_format == NULL)
+	if (iodev->format == NULL)
 		return -EINVAL;
-	cras_iodev_init_audio_area(iodev, iodev->hw_format->num_channels);
+	cras_iodev_init_audio_area(iodev, iodev->format->num_channels);
 
 	if (hfp_info_running(hfpio->info))
 		goto add_dev;
@@ -129,7 +129,7 @@ static int get_buffer(struct cras_iodev *iodev,
 	iodev->area->frames = *frames;
 	/* HFP is mono only. */
 	iodev->area->channels[0].step_bytes =
-		cras_get_format_bytes(iodev->hw_format);
+		cras_get_format_bytes(iodev->format);
 	iodev->area->channels[0].buf = dst;
 
 	*area = iodev->area;

@@ -52,7 +52,7 @@ static unsigned int current_level(const struct cras_iodev *iodev)
 	subtract_timespecs(&now, &empty_iodev->last_buffer_access, &time_since);
 
 	frames_since_last = cras_time_to_frames(&time_since,
-						iodev->hw_format->frame_rate);
+						iodev->format->frame_rate);
 
 	if (iodev->direction == CRAS_STREAM_INPUT)
 		return (frames + frames_since_last) % EMPTY_FRAMES;
@@ -104,10 +104,10 @@ static int open_dev(struct cras_iodev *iodev)
 {
 	struct empty_iodev *empty_iodev = (struct empty_iodev *)iodev;
 
-	if (iodev->hw_format == NULL)
+	if (iodev->format == NULL)
 		return -EINVAL;
 
-	cras_iodev_init_audio_area(iodev, iodev->hw_format->num_channels);
+	cras_iodev_init_audio_area(iodev, iodev->format->num_channels);
 	empty_iodev->open = 1;
 	empty_iodev->audio_buffer = calloc(1, EMPTY_BUFFER_SIZE);
 	empty_iodev->buffer_level = 0;
@@ -129,7 +129,7 @@ static int get_buffer(struct cras_iodev *iodev,
 		*frames = MIN(*frames, current_level(iodev));
 
 	iodev->area->frames = *frames;
-	cras_audio_area_config_buf_pointers(iodev->area, iodev->hw_format,
+	cras_audio_area_config_buf_pointers(iodev->area, iodev->format,
 			empty_iodev->audio_buffer);
 	*area = iodev->area;
 	return 0;

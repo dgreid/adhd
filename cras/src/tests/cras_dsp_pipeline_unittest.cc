@@ -464,7 +464,7 @@ TEST_F(DspPipelineTestSuite, Complex) {
 
   int16_t *samples = new int16_t[DSP_BUFFER_SIZE];
   fill_test_data(samples, DSP_BUFFER_SIZE);
-  cras_dsp_pipeline_apply(p, 2, (uint8_t*)samples, 100);
+  cras_dsp_pipeline_apply(p, (uint8_t*)samples, 100);
   /* the data flow through 2 plugins because m4 is disabled. */
   verify_processed_data(samples, 100, 2);
   delete[] samples;

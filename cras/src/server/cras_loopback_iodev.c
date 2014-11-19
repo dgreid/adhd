@@ -89,10 +89,10 @@ static int open_dev(struct cras_iodev *iodev)
 {
 	struct loopback_iodev *loopback_iodev = (struct loopback_iodev *)iodev;
 
-	cras_iodev_init_audio_area(iodev, iodev->hw_format->num_channels);
+	cras_iodev_init_audio_area(iodev, iodev->format->num_channels);
 	loopback_iodev->open = 1;
 
-	loopback_iodev->buffer = malloc(cras_get_format_bytes(iodev->hw_format)*
+	loopback_iodev->buffer = malloc(cras_get_format_bytes(iodev->format)*
 					LOOPBACK_BUFFER_SIZE);
 	loopback_iodev->buffer_frames = LOOPBACK_BUFFER_SIZE;
 	loopback_iodev->read_offset = 0;
@@ -105,13 +105,13 @@ static int get_buffer(struct cras_iodev *iodev,
 		      unsigned *frames)
 {
 	struct loopback_iodev *loopdev = (struct loopback_iodev *)iodev;
-	unsigned int frame_bytes = cras_get_format_bytes(iodev->hw_format);
+	unsigned int frame_bytes = cras_get_format_bytes(iodev->format);
 
 	*frames = MIN(*frames, loopdev->buffer_frames - loopdev->read_offset);
 	*frames = MIN(*frames, frames_queued(iodev));
 
 	iodev->area->frames = *frames;
-	cras_audio_area_config_buf_pointers(iodev->area, iodev->hw_format,
+	cras_audio_area_config_buf_pointers(iodev->area, iodev->format,
 			loopdev->buffer + loopdev->read_offset * frame_bytes);
 	*area = iodev->area;
 	return 0;
@@ -199,7 +199,7 @@ int loopback_iodev_add_audio(struct cras_iodev *dev,
 	if (!is_open(dev))
 		return 0;
 
-	frame_bytes = cras_get_format_bytes(dev->hw_format);
+	frame_bytes = cras_get_format_bytes(dev->format);
 
 	/* copy samples to buffer accounting for wrap around. */
 	dst = loopdev->buffer + loopdev->write_offset * frame_bytes;
@@ -235,7 +235,7 @@ int loopback_iodev_add_zeros(struct cras_iodev *dev,
 	if (!is_open(dev))
 		return 0;
 
-	frame_bytes = cras_get_format_bytes(dev->hw_format);
+	frame_bytes = cras_get_format_bytes(dev->format);
 
 	/* copy samples to buffer accounting for wrap around. */
 	dst = loopdev->buffer + loopdev->write_offset * frame_bytes;

@@ -74,7 +74,7 @@ struct cras_ionode {
  * update_active_node - Update the active node using the selected/plugged state.
  * update_channel_layout - Update the channel layout base on set iodev->format,
  *     expect the best available layout be filled to iodev->format.
- * hw_format - The audio format being rendered or captured to hardware.
+ * format - The audio format being rendered or captured to hardware.
  * ext_format - The audio format that is visible to the rest of the system.
  *     This can be different than the hardware if the device dsp changes it.
  * rate_est - Rate estimator to estimate the actual device rate.
@@ -123,7 +123,7 @@ struct cras_iodev {
 	int (*dev_running)(const struct cras_iodev *iodev);
 	void (*update_active_node)(struct cras_iodev *iodev);
 	int (*update_channel_layout)(struct cras_iodev *iodev);
-	struct cras_audio_format *hw_format;
+	struct cras_audio_format *format;
 	struct cras_audio_format *ext_format;
 	struct rate_estimator *rate_est;
 	struct cras_audio_area *area;
@@ -332,18 +332,32 @@ int cras_iodev_open(struct cras_iodev *iodev);
 /* Open an iodev, does teardown and invokes the close_dev callback. */
 int cras_iodev_close(struct cras_iodev *iodev);
 
-/* Marks a buffer from get_buffer as read/written. */
-int cras_iodev_put_buffer(struct cras_iodev *iodev, unsigned int nframes);
+/* Marks a buffer from get_buffer as read. */
+int cras_iodev_put_input_buffer(struct cras_iodev *iodev, unsigned int nframes);
 
-/* Returns a buffer to read/write to/from.
+/* Marks a buffer from get_buffer as written. */
+int cras_iodev_put_output_buffer(struct cras_iodev *iodev, uint8_t *frames,
+				 unsigned int nframes);
+
+/* Returns a buffer to read from.
  * Args:
  *    iodev - The device.
  *    area - Filled with a pointer to the audio to read/write.
  *    frames - Filled with the number of frames that can be read/written.
  */
-int cras_iodev_get_buffer(struct cras_iodev *iodev,
-			  struct cras_audio_area **area,
-			  unsigned *frames);
+int cras_iodev_get_input_buffer(struct cras_iodev *iodev,
+				struct cras_audio_area **area,
+				unsigned *frames);
+
+/* Returns a buffer to read from.
+ * Args:
+ *    iodev - The device.
+ *    area - Filled with a pointer to the audio to read/write.
+ *    frames - Filled with the number of frames that can be read/written.
+ */
+int cras_iodev_get_output_buffer(struct cras_iodev *iodev,
+				 struct cras_audio_area **area,
+				 unsigned *frames);
 
 /* Update the estimated sample rate of the device. */
 int cras_iodev_update_rate(struct cras_iodev *iodev, unsigned int level);
@@ -355,4 +369,12 @@ int cras_iodev_reset_rate_estimator(const struct cras_iodev *iodev);
  * the device. */
 double cras_iodev_get_est_rate_ratio(const struct cras_iodev *iodev);
 
+/* Get the delay from DSP processing in frames. */
+int cras_iodev_get_dsp_delay(const struct cras_iodev *iodev);
+
+/* Get the delay for input/output in frames. */
+static inline int cras_iodev_delay_frames(const struct cras_iodev *iodev)
+{
+	return iodev->delay_frames(iodev) + cras_iodev_get_dsp_delay(iodev);
+}
 #endif /* CRAS_IODEV_H_ */

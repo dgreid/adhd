@@ -13,8 +13,10 @@
 #include "buffer_share.h"
 #include "cras_audio_area.h"
 #include "cras_dsp.h"
+#include "cras_dsp_pipeline.h"
 #include "cras_iodev.h"
 #include "cras_iodev_list.h"
+#include "cras_mix.h"
 #include "cras_rstream.h"
 #include "cras_system_state.h"
 #include "cras_util.h"
@@ -100,10 +102,43 @@ static void set_default_channel_count_layout(struct cras_iodev *iodev)
 	 * see any device only supports channel count > 2, make sure
 	 * it has a default channel layout. */
 	num_channels = get_best_channel_count(iodev, stereo_channel_count);
-	iodev->hw_format->num_channels = num_channels;
-	if (num_channels == stereo_channel_count)
-		cras_audio_format_set_channel_layout(iodev->hw_format,
+	iodev->format->num_channels = num_channels;
+	iodev->ext_format->num_channels = num_channels;
+	if (num_channels == stereo_channel_count) {
+		cras_audio_format_set_channel_layout(iodev->format,
 						     stereo_layout);
+		cras_audio_format_set_channel_layout(iodev->ext_format,
+						     stereo_layout);
+	}
+}
+
+/* Applies the DSP to the samples for the iodev if applicable. */
+static void apply_dsp(struct cras_iodev *iodev, uint8_t *buf, size_t frames)
+{
+	struct cras_dsp_context *ctx;
+	struct pipeline *pipeline;
+
+	ctx = iodev->dsp_context;
+	if (!ctx)
+		return;
+
+	pipeline = cras_dsp_get_pipeline(ctx);
+	if (!pipeline)
+		return;
+
+	cras_dsp_pipeline_apply(pipeline,
+				buf,
+				frames);
+
+	cras_dsp_put_pipeline(ctx);
+}
+
+static void cras_iodev_free_dsp(struct cras_iodev *iodev)
+{
+	if (iodev->dsp_context) {
+		cras_dsp_context_free(iodev->dsp_context);
+		iodev->dsp_context = NULL;
+	}
 }
 
 /* Modifies the format to the one that will be presented to the device after
@@ -116,13 +151,15 @@ static inline void adjust_dev_fmt_for_dsp(const struct cras_iodev *iodev)
 		return;
 
 	if (iodev->direction == CRAS_STREAM_OUTPUT) {
-		iodev->hw_format->num_channels =
+		iodev->format->num_channels =
 			cras_dsp_num_output_channels(ctx);
 		iodev->ext_format->num_channels =
 			cras_dsp_num_input_channels(ctx);
 	}
-	iodev->hw_format->num_channels = cras_dsp_num_input_channels(ctx);
+	iodev->format->num_channels = cras_dsp_num_input_channels(ctx);
 	iodev->ext_format->num_channels = cras_dsp_num_output_channels(ctx);
+
+	cras_dsp_put_pipeline(ctx);
 }
 
 int cras_iodev_set_format(struct cras_iodev *iodev,
@@ -133,12 +170,12 @@ int cras_iodev_set_format(struct cras_iodev *iodev,
 
 	/* If this device isn't already using a format, try to match the one
 	 * requested in "fmt". */
-	if (iodev->hw_format == NULL) {
-		iodev->hw_format = malloc(sizeof(struct cras_audio_format));
+	if (iodev->format == NULL) {
+		iodev->format = malloc(sizeof(struct cras_audio_format));
 		iodev->ext_format = malloc(sizeof(struct cras_audio_format));
-		if (!iodev->hw_format || !iodev->hw_format)
+		if (!iodev->format || !iodev->ext_format)
 			return -ENOMEM;
-		*iodev->hw_format = *fmt;
+		*iodev->format = *fmt;
 		*iodev->ext_format = *fmt;
 
 		if (iodev->update_supported_formats) {
@@ -155,23 +192,29 @@ int cras_iodev_set_format(struct cras_iodev *iodev,
 
 		actual_rate = get_best_rate(iodev, fmt->frame_rate);
 		actual_num_channels = get_best_channel_count(iodev,
-					iodev->hw_format->num_channels);
+					iodev->format->num_channels);
 		if (actual_rate == 0 || actual_num_channels == 0) {
 			/* No compatible frame rate found. */
 			rc = -EINVAL;
 			goto error;
 		}
-		iodev->hw_format->frame_rate = actual_rate;
+		iodev->format->frame_rate = actual_rate;
 		iodev->ext_format->frame_rate = actual_rate;
-		iodev->hw_format->num_channels = actual_num_channels;
+		if (iodev->format->num_channels != actual_num_channels) {
+			iodev->format->num_channels = actual_num_channels;
+			iodev->ext_format->num_channels = actual_num_channels;
+			cras_iodev_free_dsp(iodev);
+		}
 		/* TODO(dgreid) - allow other formats. */
-		iodev->hw_format->format = SND_PCM_FORMAT_S16_LE;
+		iodev->format->format = SND_PCM_FORMAT_S16_LE;
 		iodev->ext_format->format = SND_PCM_FORMAT_S16_LE;
 
 		if (iodev->update_channel_layout) {
 			rc = iodev->update_channel_layout(iodev);
-			if (rc < 0)
+			if (rc < 0) {
 				set_default_channel_count_layout(iodev);
+				cras_iodev_free_dsp(iodev);
+			}
 		}
 
 		if (!iodev->rate_est)
@@ -197,9 +240,9 @@ int cras_iodev_set_format(struct cras_iodev *iodev,
 	return 0;
 
 error:
-	free(iodev->hw_format);
+	free(iodev->format);
 	free(iodev->ext_format);
-	iodev->hw_format = NULL;
+	iodev->format = NULL;
 	iodev->ext_format = NULL;
 	return rc;
 }
@@ -216,9 +259,9 @@ void cras_iodev_update_dsp(struct cras_iodev *iodev)
 
 void cras_iodev_free_format(struct cras_iodev *iodev)
 {
-	free(iodev->hw_format);
+	free(iodev->format);
 	free(iodev->ext_format);
-	iodev->hw_format = NULL;
+	iodev->format = NULL;
 	iodev->ext_format = NULL;
 }
 
@@ -230,7 +273,7 @@ void cras_iodev_init_audio_area(struct cras_iodev *iodev,
 		cras_iodev_free_audio_area(iodev);
 
 	iodev->area = cras_audio_area_create(num_channels);
-	cras_audio_area_config_channels(iodev->area, iodev->hw_format);
+	cras_audio_area_config_channels(iodev->area, iodev->format);
 }
 
 void cras_iodev_free_audio_area(struct cras_iodev *iodev)
@@ -240,14 +283,6 @@ void cras_iodev_free_audio_area(struct cras_iodev *iodev)
 
 	cras_audio_area_destroy(iodev->area);
 	iodev->area = NULL;
-}
-
-static void cras_iodev_free_dsp(struct cras_iodev *iodev)
-{
-	if (iodev->dsp_context) {
-		cras_dsp_context_free(iodev->dsp_context);
-		iodev->dsp_context = NULL;
-	}
 }
 
 void cras_iodev_free_resources(struct cras_iodev *iodev)
@@ -480,19 +515,63 @@ int cras_iodev_close(struct cras_iodev *iodev)
 	return iodev->close_dev(iodev);
 }
 
-int cras_iodev_put_buffer(struct cras_iodev *iodev, unsigned int nframes)
+int cras_iodev_put_input_buffer(struct cras_iodev *iodev, unsigned int nframes)
 {
-	rate_estimator_add_frames(
-			iodev->rate_est,
-			(iodev->direction == CRAS_STREAM_OUTPUT)
-					? nframes
-					: -nframes);
+	rate_estimator_add_frames(iodev->rate_est, -nframes);
 	return iodev->put_buffer(iodev, nframes);
 }
 
-int cras_iodev_get_buffer(struct cras_iodev *iodev,
-			  struct cras_audio_area **area,
-			  unsigned *frames)
+int cras_iodev_put_output_buffer(struct cras_iodev *iodev, uint8_t *frames,
+				 unsigned int nframes)
+{
+	const struct cras_audio_format *fmt = iodev->format;
+
+	if (cras_system_get_mute()) {
+		const unsigned int frame_bytes = cras_get_format_bytes(fmt);
+		cras_mix_mute_buffer(frames, frame_bytes, nframes);
+	} else {
+		apply_dsp(iodev, frames, nframes);
+
+		if (cras_iodev_software_volume_needed(iodev)) {
+			unsigned int nsamples = nframes * fmt->num_channels;
+			float scaler =
+				cras_iodev_get_software_volume_scaler(iodev);
+
+			cras_scale_buffer((int16_t *)frames, nsamples, scaler);
+		}
+	}
+
+	rate_estimator_add_frames(iodev->rate_est, nframes);
+	return iodev->put_buffer(iodev, nframes);
+}
+
+int cras_iodev_get_input_buffer(struct cras_iodev *iodev,
+				struct cras_audio_area **area,
+				unsigned *frames)
+{
+	const struct cras_audio_format *fmt = iodev->format;
+	const unsigned int frame_bytes = cras_get_format_bytes(fmt);
+	uint8_t *hw_buffer;
+	int rc;
+
+	rc = iodev->get_buffer(iodev, area, frames);
+	if (rc < 0 || frames == 0)
+		return rc;
+
+	/* TODO(dgreid) - This assumes interleaved audio. */
+	hw_buffer = (*area)->channels[0].buf;
+
+	if (cras_system_get_capture_mute())
+		cras_mix_mute_buffer(hw_buffer, frame_bytes, *frames);
+	else
+		apply_dsp(iodev, hw_buffer, *frames); /* TODO-applied 2x */
+
+	return rc;
+}
+
+int cras_iodev_get_output_buffer(struct cras_iodev *iodev,
+				 struct cras_audio_area **area,
+				 unsigned *frames)
 {
 	return iodev->get_buffer(iodev, area, frames);
 }
@@ -516,4 +595,24 @@ double cras_iodev_get_est_rate_ratio(const struct cras_iodev *iodev)
 {
 	return rate_estimator_get_rate(iodev->rate_est) /
 			iodev->ext_format->frame_rate;
+}
+
+int cras_iodev_get_dsp_delay(const struct cras_iodev *iodev)
+{
+	struct cras_dsp_context *ctx;
+	struct pipeline *pipeline;
+	int delay;
+
+	ctx = iodev->dsp_context;
+	if (!ctx)
+		return 0;
+
+	pipeline = cras_dsp_get_pipeline(ctx);
+	if (!pipeline)
+		return 0;
+
+	delay = cras_dsp_pipeline_get_delay(pipeline);
+
+	cras_dsp_put_pipeline(ctx);
+	return delay;
 }
