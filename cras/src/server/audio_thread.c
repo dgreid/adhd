@@ -336,7 +336,7 @@ static int fill_odev_zeros(struct active_dev *adev, unsigned int frames)
 	int rc;
 	struct cras_iodev *odev = adev->dev;
 
-	frame_bytes = cras_get_format_bytes(odev->format);
+	frame_bytes = cras_get_format_bytes(odev->hw_format);
 	while (frames > 0) {
 		frames_written = frames;
 		rc = cras_iodev_get_buffer(odev, &area, &frames_written);
@@ -401,10 +401,9 @@ static int append_stream_to_dev(struct audio_thread *thread,
 	struct dev_stream *out;
 	struct cras_audio_format fmt;
 	struct cras_iodev *dev = adev->dev;
-	struct cras_dsp_context *ctx = dev->dsp_context;
 	int rc;
 
-	if (dev->format == NULL) {
+	if (dev->hw_format == NULL) {
 		fmt = stream->format;
 		rc = cras_iodev_set_format(dev, &fmt);
 		if (rc) {
@@ -412,14 +411,7 @@ static int append_stream_to_dev(struct audio_thread *thread,
 			return rc;
 		}
 	}
-	fmt = *dev->format;
-	if (ctx) {
-		if (output_adev(adev))
-			fmt.num_channels = cras_dsp_num_input_channels(ctx);
-		else
-			fmt.num_channels = cras_dsp_num_output_channels(ctx);
-	}
-	out = dev_stream_create(stream, dev->info.idx, &fmt, dev);
+	out = dev_stream_create(stream, dev->info.idx, dev->ext_format, dev);
 	if (!out)
 		return -EINVAL;
 
@@ -783,7 +775,6 @@ static void apply_dsp(struct cras_iodev *iodev, uint8_t *buf, size_t frames)
 		return;
 
 	cras_dsp_pipeline_apply(pipeline,
-				iodev->format->num_channels,
 				buf,
 				frames);
 
@@ -942,7 +933,7 @@ static int write_streams(struct audio_thread *thread,
 	struct cras_iodev *odev = adev->dev;
 	struct dev_stream *curr;
 	unsigned int max_offset = 0;
-	unsigned int frame_bytes = cras_get_format_bytes(odev->format);
+	unsigned int frame_bytes = cras_get_format_bytes(odev->ext_format);
 	unsigned int num_playing = 0;
 	unsigned int drain_limit = write_limit;
 
@@ -991,7 +982,7 @@ static int write_streams(struct audio_thread *thread,
 		offset = cras_iodev_stream_offset(odev, curr);
 		if (offset >= write_limit)
 			continue;
-		nwritten = dev_stream_mix(curr, odev->format->num_channels,
+		nwritten = dev_stream_mix(curr, odev->ext_format->num_channels,
 					  dst + frame_bytes * offset,
 					  write_limit - offset);
 
@@ -1311,7 +1302,7 @@ static void set_odev_wake_times(struct active_dev *dev_list)
 					    adev->coarse_rate_adjust,
 					    adev->dev->min_cb_level);
 
-		cras_frames_to_time(hw_level, adev->dev->format->frame_rate,
+		cras_frames_to_time(hw_level, adev->dev->ext_format->frame_rate,
 				    &sleep_time);
 		adev->wake_ts = now;
 		add_timespecs(&adev->wake_ts, &sleep_time);
@@ -1363,7 +1354,7 @@ static void update_estimated_rate(struct audio_thread *thread,
 		}
 
 		dev_stream_set_dev_rate(dev_stream,
-				dev->format->frame_rate,
+				dev->ext_format->frame_rate,
 				cras_iodev_get_est_rate_ratio(dev),
 				cras_iodev_get_est_rate_ratio(master_dev),
 				adev->coarse_rate_adjust);
@@ -1431,17 +1422,17 @@ static int write_output_samples(struct audio_thread *thread,
 
 		if (cras_system_get_mute()) {
 			unsigned int frame_bytes;
-			frame_bytes = cras_get_format_bytes(odev->format);
+			frame_bytes = cras_get_format_bytes(odev->hw_format);
 			cras_mix_mute_buffer(dst, frame_bytes, written);
 		} else {
 			apply_dsp(odev, dst, written);
 		}
 
 		if (cras_iodev_software_volume_needed(odev)) {
-			cras_scale_buffer((int16_t *)dst,
-					  written * odev->format->num_channels,
-					  cras_iodev_get_software_volume_scaler(
-							odev));
+			cras_scale_buffer(
+				(int16_t *)dst,
+				written * odev->hw_format->num_channels,
+				cras_iodev_get_software_volume_scaler(odev));
 		}
 
 		rc = cras_iodev_put_buffer(odev, written);
@@ -1540,7 +1531,7 @@ static int capture_to_streams(struct audio_thread *thread,
 			      unsigned int dev_index)
 {
 	struct cras_iodev *idev = adev->dev;
-	unsigned int frame_bytes = cras_get_format_bytes(idev->format);
+	unsigned int frame_bytes = cras_get_format_bytes(idev->hw_format);
 	snd_pcm_uframes_t remainder, hw_level;
 
 	hw_level = idev->frames_queued(idev);
@@ -1573,7 +1564,7 @@ static int capture_to_streams(struct audio_thread *thread,
 		if (cras_system_get_capture_mute())
 			cras_mix_mute_buffer(hw_buffer, frame_bytes, nread);
 		else
-			apply_dsp(idev, hw_buffer, nread);
+			apply_dsp(idev, hw_buffer, nread); /* TODO-applied 2x */
 
 		DL_FOREACH(adev->dev->streams, stream) {
 			unsigned int this_read;

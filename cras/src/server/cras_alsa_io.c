@@ -163,22 +163,20 @@ static int open_dev(struct cras_iodev *iodev)
 	/* This is called after the first stream added so configure for it.
 	 * format must be set before opening the device.
 	 */
-	if (iodev->format == NULL)
+	if (iodev->hw_format == NULL)
 		return -EINVAL;
-	/* TODO(dgreid) - allow more formats here. */
-	iodev->format->format = SND_PCM_FORMAT_S16_LE;
 	aio->num_underruns = 0;
-	cras_iodev_init_audio_area(iodev, iodev->format->num_channels);
+	cras_iodev_init_audio_area(iodev, iodev->hw_format->num_channels);
 
 	syslog(LOG_DEBUG, "Configure alsa device %s rate %zuHz, %zu channels",
-	       aio->dev, iodev->format->frame_rate,
-	       iodev->format->num_channels);
+	       aio->dev, iodev->hw_format->frame_rate,
+	       iodev->hw_format->num_channels);
 	handle = 0; /* Avoid unused warning. */
 	rc = cras_alsa_pcm_open(&handle, aio->dev, aio->alsa_stream);
 	if (rc < 0)
 		return rc;
 
-	rc = cras_alsa_set_hwparams(handle, iodev->format,
+	rc = cras_alsa_set_hwparams(handle, iodev->hw_format,
 				    &iodev->buffer_size);
 	if (rc < 0) {
 		cras_alsa_pcm_close(handle);
@@ -187,7 +185,7 @@ static int open_dev(struct cras_iodev *iodev)
 
 	/* Set channel map to device */
 	rc = cras_alsa_set_channel_map(handle,
-				       iodev->format);
+				       iodev->hw_format);
 	if (rc < 0) {
 		cras_alsa_pcm_close(handle);
 		return rc;
@@ -256,7 +254,7 @@ static int get_buffer(struct cras_iodev *iodev,
 	int rc;
 
 	aio->mmap_offset = 0;
-	format_bytes = cras_get_format_bytes(iodev->format);
+	format_bytes = cras_get_format_bytes(iodev->hw_format);
 
 	rc = cras_alsa_mmap_begin(aio->handle,
 				  format_bytes,
@@ -266,7 +264,7 @@ static int get_buffer(struct cras_iodev *iodev,
 				  &aio->num_underruns);
 
 	iodev->area->frames = nframes;
-	cras_audio_area_config_buf_pointers(iodev->area, iodev->format, dst);
+	cras_audio_area_config_buf_pointers(iodev->area, iodev->hw_format, dst);
 
 	*area = iodev->area;
 	*frames = nframes;
@@ -330,13 +328,13 @@ static int update_channel_layout(struct cras_iodev *iodev)
 
 	/* Sets frame rate and channel count to alsa device before
 	 * we test channel mapping. */
-	err = cras_alsa_set_hwparams(handle, iodev->format, &buf_size);
+	err = cras_alsa_set_hwparams(handle, iodev->hw_format, &buf_size);
 	if (err < 0) {
 		cras_alsa_pcm_close(handle);
 		return err;
 	}
 
-	err = cras_alsa_get_channel_map(handle, iodev->format);
+	err = cras_alsa_get_channel_map(handle, iodev->hw_format);
 
 	cras_alsa_pcm_close(handle);
 	return err;

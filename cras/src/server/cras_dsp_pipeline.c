@@ -814,7 +814,7 @@ void cras_dsp_pipeline_add_statistic(struct pipeline *pipeline,
 	pipeline->total_time += t;
 }
 
-void cras_dsp_pipeline_apply(struct pipeline *pipeline, unsigned int channels,
+void cras_dsp_pipeline_apply(struct pipeline *pipeline,
 			     uint8_t *buf, unsigned int frames)
 {
 	size_t remaining;

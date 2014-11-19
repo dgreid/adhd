@@ -126,11 +126,10 @@ void cras_dsp_pipeline_add_statistic(struct pipeline *pipeline,
 /* Runs the specified pipeline across the given interleaved buffer in place.
  * Args:
  *    pipeline - The pipeline to run.
- *    channels - Number of audio channels in the buffer. (e.g. stereo = 2)
  *    buf - The samples to be processed, interleaved.
  *    frames - the numver of samples in the buffer.
  */
-void cras_dsp_pipeline_apply(struct pipeline *pipeline, unsigned int channels,
+void cras_dsp_pipeline_apply(struct pipeline *pipeline,
 			     uint8_t *buf, unsigned int frames);
 
 /* Dumps the current state of the pipeline. For debugging only */

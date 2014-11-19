@@ -165,7 +165,7 @@ void hfp_buf_acquire(struct hfp_info *info, struct cras_iodev *dev,
 		     uint8_t **buf, unsigned *count)
 {
 	size_t format_bytes;
-	format_bytes = cras_get_format_bytes(dev->format);
+	format_bytes = cras_get_format_bytes(dev->hw_format);
 
 	*count *= format_bytes;
 
@@ -180,14 +180,14 @@ void hfp_buf_acquire(struct hfp_info *info, struct cras_iodev *dev,
 
 int hfp_buf_size(struct hfp_info *info, struct cras_iodev *dev)
 {
-	return HFP_BUF_SIZE_BYTES / cras_get_format_bytes(dev->format);
+	return HFP_BUF_SIZE_BYTES / cras_get_format_bytes(dev->hw_format);
 }
 
 void hfp_buf_release(struct hfp_info *info, struct cras_iodev *dev,
 		     unsigned written_frames)
 {
 	size_t format_bytes;
-	format_bytes = cras_get_format_bytes(dev->format);
+	format_bytes = cras_get_format_bytes(dev->hw_format);
 
 	written_frames *= format_bytes;
 
@@ -200,7 +200,7 @@ void hfp_buf_release(struct hfp_info *info, struct cras_iodev *dev,
 int hfp_buf_queued(struct hfp_info *info, const struct cras_iodev *dev)
 {
 	size_t format_bytes;
-	format_bytes = cras_get_format_bytes(dev->format);
+	format_bytes = cras_get_format_bytes(dev->hw_format);
 
 	if (dev->direction == CRAS_STREAM_OUTPUT)
 		return queued_bytes(info->playback_buf) / format_bytes;

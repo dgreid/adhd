@@ -30,7 +30,6 @@ struct cras_dsp_context {
 	struct pipeline *pipeline;
 
 	struct cras_expr_env env;
-	int channels;
 	int sample_rate;
 	const char *purpose;
 	struct cras_dsp_context *prev, *next;
@@ -99,14 +98,6 @@ static struct pipeline *prepare_pipeline(struct cras_dsp_context *ctx)
 
 	if (cras_dsp_pipeline_instantiate(pipeline, ctx->sample_rate) != 0) {
 		syslog(LOG_ERR, "cannot instantiate pipeline");
-		goto bail;
-	}
-
-	if (cras_dsp_pipeline_get_num_input_channels(pipeline) !=
-	    ctx->channels) {
-		syslog(LOG_ERR, "pipeline channel count mismatch (%d vs %d)",
-		       cras_dsp_pipeline_get_num_input_channels(pipeline),
-		       ctx->channels);
 		goto bail;
 	}
 
@@ -298,14 +289,13 @@ void cras_dsp_stop()
 	}
 }
 
-struct cras_dsp_context *cras_dsp_context_new(int channels, int sample_rate,
+struct cras_dsp_context *cras_dsp_context_new(int sample_rate,
 					      const char *purpose)
 {
 	struct cras_dsp_context *ctx = calloc(1, sizeof(*ctx));
 
 	pthread_mutex_init(&ctx->mutex, NULL);
 	initialize_environment(&ctx->env);
-	ctx->channels = channels;
 	ctx->sample_rate = sample_rate;
 	ctx->purpose = strdup(purpose);
 
