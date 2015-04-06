@@ -19,7 +19,15 @@ namespace {
 static const unsigned int kBufferFrames = 16384;
 static const unsigned int kFrameBytes = 4;
 static const unsigned int kBufferSize = kBufferFrames * kFrameBytes;
+
 static cras_audio_area *dummy_audio_area;
+static int (*loop_hook)(const uint8_t *frames, unsigned int nframes,
+			const struct cras_audio_format *fmt);
+static unsigned int cras_iodev_list_add_input_called;
+static unsigned int cras_iodev_list_rm_input_called;
+static unsigned int cras_iodev_list_add_dev_open_callback_called;
+static void (*cras_iodev_list_add_dev_open_callback_cb)(struct cras_iodev *dev,
+							int opened);
 
 class LoopBackTestSuite : public testing::Test{
   protected:
@@ -33,102 +41,77 @@ class LoopBackTestSuite : public testing::Test{
       fmt_.num_channels = 2;
       fmt_.format = SND_PCM_FORMAT_S16_LE;
 
-      loopback_iodev_create(&loop_in_, &loop_out_);
+      loop_in_ = loopback_iodev_create(LOOPBACK_POST_MIX_PRE_DSP);
+      EXPECT_EQ(1, cras_iodev_list_add_input_called);
+      EXPECT_EQ(1, cras_iodev_list_add_dev_open_callback_called);
       loop_in_->format = &fmt_;
-      loop_out_->format = &fmt_;
+
+      loop_hook = NULL;
+      cras_iodev_list_add_input_called = 0;
+      cras_iodev_list_rm_input_called = 0;
+      cras_iodev_list_add_dev_open_callback_called = 0;
     }
 
     virtual void TearDown() {
-      loopback_iodev_destroy(loop_in_, loop_out_);
-      free(dummy_audio_area);
+      cras_iodev_list_add_dev_open_callback_called = 0;
+      loopback_iodev_destroy(loop_in_);
+      EXPECT_EQ(1, cras_iodev_list_rm_input_called);
+      EXPECT_EQ(1, cras_iodev_list_add_dev_open_callback_called);
     }
 
     uint8_t buf_[kBufferSize];
     struct cras_audio_format fmt_;
-    struct cras_iodev *loop_in_, *loop_out_;
+    struct cras_iodev *loop_in_;
 };
 
 TEST_F(LoopBackTestSuite, OpenAndCloseDevice) {
   int rc;
 
   // Open loopback devices.
-  rc = loop_out_->open_dev(loop_out_);
-  EXPECT_EQ(rc, 0);
   rc = loop_in_->open_dev(loop_in_);
-  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(0, rc);
 
   // Check device open status.
-  rc = loop_out_->is_open(loop_out_);
-  EXPECT_EQ(rc, 1);
   rc = loop_in_->is_open(loop_in_);
-  EXPECT_EQ(rc, 1);
+  EXPECT_EQ(1, rc);
 
   // Check zero frames queued.
-  rc = loop_out_->frames_queued(loop_out_);
-  EXPECT_EQ(rc, 0);
   rc = loop_in_->frames_queued(loop_in_);
-  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(0, rc);
 
   // Close loopback devices.
   rc = loop_in_->close_dev(loop_in_);
-  EXPECT_EQ(rc, 0);
-  rc = loop_out_->close_dev(loop_out_);
-  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(0, rc);
 
   // Check device open status.
-  rc = loop_out_->is_open(loop_out_);
-  EXPECT_EQ(rc, 0);
   rc = loop_in_->is_open(loop_in_);
-  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(0, rc);
 }
 
 TEST_F(LoopBackTestSuite, SimpleLoopback) {
-  static cras_audio_area *area;
+  cras_audio_area *area;
+  unsigned int nframes = 1024;
   unsigned int nread = 1024;
   int rc;
 
-  loop_out_->open_dev(loop_out_);
   loop_in_->open_dev(loop_in_);
+  ASSERT_NE(reinterpret_cast<void *>(NULL), loop_hook);
 
-  // Copy frames to loopback playback.
-  loop_out_->get_buffer(loop_out_, &area, &nread);
-  EXPECT_EQ(nread, 1024);
-  memcpy(area->channels[0].buf, buf_, nread);
-  loop_out_->put_buffer(loop_out_, nread);
-
-  // Check frames queued.
-  rc = loop_out_->frames_queued(loop_out_);
-  EXPECT_EQ(rc, 1024);
+  // Loopback callback for the hook.
+  loop_hook(buf_, nframes, &fmt_);
 
   // Verify frames from loopback record.
   loop_in_->get_buffer(loop_in_, &area, &nread);
-  EXPECT_EQ(nread, 1024);
-  rc = memcmp(area->channels[0].buf, buf_, nread);
-  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(nframes, nread);
+  rc = memcmp(area->channels[0].buf, buf_, nframes * 4);
+  EXPECT_EQ(0, rc);
   loop_in_->put_buffer(loop_in_, nread);
 
   // Check zero frames queued.
-  rc = loop_out_->frames_queued(loop_in_);
-  EXPECT_EQ(rc, 0);
+  rc = loop_in_->frames_queued(loop_in_);
+  EXPECT_EQ(0, rc);
 
   loop_in_->close_dev(loop_in_);
-  loop_out_->close_dev(loop_out_);
-}
-
-TEST_F(LoopBackTestSuite, CheckSharedBufferLimit) {
-  static cras_audio_area *area;
-  unsigned int nread = 1024 * 16;
-
-  loop_out_->open_dev(loop_out_);
-  loop_in_->open_dev(loop_in_);
-
-  // Check loopback shared buffer limit.
-  loop_out_->get_buffer(loop_out_, &area, &nread);
-  EXPECT_EQ(nread, 8192);
-  loop_out_->put_buffer(loop_out_, nread);
-
-  loop_in_->close_dev(loop_in_);
-  loop_out_->close_dev(loop_out_);
 }
 
 /* Stubs */
@@ -154,9 +137,46 @@ void cras_iodev_init_audio_area(struct cras_iodev *iodev, int num_channels)
   iodev->area = dummy_audio_area;
 }
 
+void cras_iodev_add_node(struct cras_iodev *iodev, struct cras_ionode *node)
+{
+}
+
+void cras_iodev_set_active_node(struct cras_iodev *iodev,
+                                struct cras_ionode *node)
+{
+}
+
+void cras_iodev_register_pre_dsp_hook(struct cras_iodev *iodev,
+				      loopback_hook_t loop_cb)
+{
+  loop_hook = loop_cb;
+  return 0;
+}
+
+void cras_iodev_register_post_dsp_hook(struct cras_iodev *iodev,
+				       loopback_hook_t loop_cb)
+{
+  loop_hook = loop_cb;
+  return 0;
+}
+
+int cras_iodev_list_add_input(struct cras_iodev *input)
+{
+  cras_iodev_list_add_input_called++;
+  return 0;
+}
+
 int cras_iodev_list_rm_input(struct cras_iodev *input)
 {
+  cras_iodev_list_rm_input_called++;
   return 0;
+}
+
+int cras_iodev_list_add_dev_open_callback(struct cras_iodev *dev,
+					  device_open_callback_t cb)
+{
+	cras_iodev_list_add_dev_open_callback_called++;
+	cras_iodev_list_add_dev_open_callback_cb = cb;
 }
 
 }  // extern "C"

@@ -24,6 +24,7 @@ struct stream_list;
 
 typedef void (*node_volume_callback_t)(cras_node_id_t, int);
 typedef void (*node_left_right_swapped_callback_t)(cras_node_id_t, int);
+typedef void (*device_open_callback_t)(struct cras_iodev *dev, int opened);
 
 /* Initialize the list of iodevs. */
 void cras_iodev_list_init();

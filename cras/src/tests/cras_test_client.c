@@ -1087,7 +1087,6 @@ int main(int argc, char **argv)
 			break;
 		case 'l':
 			loopback_file = optarg;
-			pin_device_id = LOOPBACK_RECORD_DEVICE;
 			break;
 		case 'b':
 			block_size = atoi(optarg);
@@ -1305,6 +1304,8 @@ int main(int argc, char **argv)
 			rc = run_playback(client, playback_file,
 					block_size, rate, num_channels);
 	} else if (loopback_file != NULL) {
+		pin_device_id = cras_client_get_first_dev_type_idx(client,
+				CRAS_NODE_TYPE_AOKR, CRAS_STREAM_INPUT);
 		rc = run_capture(client, loopback_file,
 				 block_size, rate, num_channels);
 	}
