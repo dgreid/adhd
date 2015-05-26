@@ -25,9 +25,6 @@
 #include "audio_thread.h"
 #include "utlist.h"
 
-#define MIN_PROCESS_TIME_US 500 /* 0.5ms - min amount of time to mix/src. */
-#define SLEEP_FUZZ_FRAMES 10 /* # to consider "close enough" to sleep frames. */
-#define MIN_READ_WAIT_US 2000 /* 2ms */
 static const struct timespec playback_wake_fuzz_ts = {
 	0, 500 * 1000 /* 500 usec. */
 };
