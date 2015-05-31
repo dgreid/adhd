@@ -25,10 +25,6 @@
 #include "audio_thread.h"
 #include "utlist.h"
 
-static const struct timespec playback_wake_fuzz_ts = {
-	0, 500 * 1000 /* 500 usec. */
-};
-
 /* Messages that can be sent from the main context to the audio thread. */
 enum AUDIO_THREAD_COMMAND {
 	AUDIO_THREAD_ADD_OPEN_DEV,
@@ -196,29 +192,6 @@ static void update_stream_timeout(struct cras_audio_shm *shm)
 	longest_timeout_msec = cras_shm_get_longest_timeout(shm);
 	if (timeout_msec > longest_timeout_msec)
 		cras_shm_set_longest_timeout(shm, timeout_msec);
-}
-
-/* Requests audio from a stream and marks it as pending. */
-static int fetch_stream(struct dev_stream *dev_stream,
-			unsigned int frames_in_buff, unsigned int delay)
-{
-	struct cras_rstream *rstream = dev_stream->stream;
-	struct cras_audio_shm *shm = cras_rstream_output_shm(rstream);
-	int rc;
-
-	audio_thread_event_log_data(
-			atlog,
-			AUDIO_THREAD_FETCH_STREAM,
-			rstream->stream_id,
-			cras_rstream_get_cb_threshold(rstream), delay);
-	rc = dev_stream_request_playback_samples(dev_stream);
-	if (rc < 0)
-		return rc;
-
-	update_stream_timeout(shm);
-	cras_shm_clear_first_timeout(shm);
-
-	return 0;
 }
 
 /* Put 'frames' worth of zero samples into odev. */
@@ -579,116 +552,6 @@ static int thread_add_stream(struct audio_thread *thread,
 	return 0;
 }
 
-/* Reads any pending audio message from the socket. */
-static void flush_old_aud_messages(struct cras_audio_shm *shm, int fd)
-{
-	struct audio_message msg;
-	struct pollfd pollfd;
-	int err;
-
-	pollfd.fd = fd;
-	pollfd.events = POLLIN;
-
-	do {
-		err = poll(&pollfd, 1, 0);
-		if (pollfd.revents & POLLIN) {
-			err = read(fd, &msg, sizeof(msg));
-			cras_shm_set_callback_pending(shm, 0);
-		}
-	} while (err > 0);
-}
-
-/* Asks any stream with room for more data. Sets the time stamp for all streams.
- * Args:
- *    thread - The thread to fetch samples for.
- *    adev - The output device streams are attached to.
- * Returns:
- *    0 on success, negative error on failure. If failed, can assume that all
- *    streams have been removed from the device.
- */
-static int fetch_streams(struct audio_thread *thread,
-			 struct open_dev *adev)
-{
-	struct dev_stream *dev_stream;
-	struct cras_iodev *odev = adev->dev;
-	int frames_in_buff;
-	int rc;
-	int delay;
-
-	delay = cras_iodev_delay_frames(odev);
-	if (delay < 0)
-		return delay;
-
-	DL_FOREACH(adev->dev->streams, dev_stream) {
-		struct cras_rstream *rstream = dev_stream->stream;
-		struct cras_audio_shm *shm =
-			cras_rstream_output_shm(rstream);
-		int fd = cras_rstream_get_audio_fd(rstream);
-		const struct timespec *next_cb_ts;
-		struct timespec now;
-
-		if (cras_shm_callback_pending(shm) && fd >= 0)
-			flush_old_aud_messages(shm, fd);
-
-		frames_in_buff = cras_shm_get_frames(shm);
-		if (frames_in_buff < 0)
-			cras_rstream_set_is_draining(rstream, 1);
-
-		if (cras_rstream_get_is_draining(dev_stream->stream))
-			continue;
-
-		next_cb_ts = dev_stream_next_cb_ts(dev_stream);
-		if (!next_cb_ts)
-			continue;
-
-		/* Check if it's time to get more data from this stream.
-		 * Allowing for waking up half a little early. */
-		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-		add_timespecs(&now, &playback_wake_fuzz_ts);
-		if (!timespec_after(&now, next_cb_ts))
-			continue;
-
-		dev_stream_set_delay(dev_stream, delay);
-
-		rc = fetch_stream(dev_stream, frames_in_buff, delay);
-		if (rc < 0) {
-			syslog(LOG_ERR, "fetch err: %d for %x",
-			       rc, rstream->stream_id);
-			cras_rstream_set_is_draining(rstream, 1);
-		}
-	}
-
-	return 0;
-}
-
-#if 0 //TODO(dgreid) - remove this, replace with check if haven't gotten data for a long time.
-/* Check if the stream kept timeout for a long period.
- * Args:
- *    stream - The stream to check
- *    rate - the frame rate of iodev
- * Returns:
- *    0 if this is a first timeout or the accumulated timeout
- *    period is not too long, -1 otherwise.
- */
-static int check_stream_timeout(struct cras_rstream *stream, unsigned int rate)
-{
-	static int longest_cb_timeout_sec = 10;
-
-	struct cras_audio_shm *shm;
-	struct timespec diff;
-	shm = cras_rstream_output_shm(stream);
-
-	cras_shm_since_first_timeout(shm, &diff);
-
-	if (!diff.tv_sec && !diff.tv_nsec) {
-		cras_shm_set_first_timeout(shm);
-		return 0;
-	}
-
-	return (diff.tv_sec > longest_cb_timeout_sec) ? -1 : 0;
-}
-#endif
-
 /* Fill the buffer with samples from the attached streams.
  * Args:
  *    thread - The thread object the device is attached to.
@@ -731,8 +594,7 @@ static int write_streams(struct audio_thread *thread,
 		audio_thread_event_log_data(atlog,
 				AUDIO_THREAD_WRITE_STREAMS_STREAM,
 				curr->stream->stream_id,
-				dev_frames,
-				cras_shm_callback_pending(shm));
+				dev_frames, 0);
 		if (cras_rstream_get_is_draining(curr->stream)) {
 			drain_limit = MIN((size_t)dev_frames, drain_limit);
 			if (!dev_frames)
@@ -973,54 +835,6 @@ static int handle_playback_thread_message(struct audio_thread *thread)
 	return ret;
 }
 
-/* Fills the time that the next stream needs to be serviced. */
-static int get_next_stream_wake_from_list(struct dev_stream *streams,
-					  struct timespec *min_ts)
-{
-	struct dev_stream *dev_stream;
-	int ret = 0; /* The total number of streams to wait on. */
-
-	DL_FOREACH(streams, dev_stream) {
-		const struct timespec *next_cb_ts;
-
-		if (cras_rstream_get_is_draining(dev_stream->stream) &&
-		    dev_stream_playback_frames(dev_stream) <= 0)
-			continue;
-		if (!cras_shm_is_buffer_available(
-				cras_rstream_output_shm(dev_stream->stream)))
-			continue;
-
-		next_cb_ts = dev_stream_next_cb_ts(dev_stream);
-		if (!next_cb_ts)
-			continue;
-
-		audio_thread_event_log_data(atlog,
-					    AUDIO_THREAD_STREAM_SLEEP_TIME,
-					    dev_stream->stream->stream_id,
-					    next_cb_ts->tv_sec,
-					    next_cb_ts->tv_nsec);
-		if (timespec_after(min_ts, next_cb_ts))
-			*min_ts = *next_cb_ts;
-		ret++;
-	}
-
-	return ret;
-}
-
-static int get_next_stream_wake(struct audio_thread *thread,
-				 struct timespec *min_ts,
-				 const struct timespec *now)
-{
-	struct open_dev *adev;
-	int ret = 0; /* The total number of streams to wait on. */
-
-	DL_FOREACH(thread->open_devs[CRAS_STREAM_OUTPUT], adev)
-		ret += get_next_stream_wake_from_list(adev->dev->streams,
-						      min_ts);
-
-	return ret;
-}
-
 static int input_adev_ignore_wake(const struct open_dev *adev)
 {
 	if (!cras_iodev_is_open(adev->dev))
@@ -1044,9 +858,6 @@ static int get_next_dev_wake(struct audio_thread *thread,
 	int ret = 0; /* The total number of devices to wait on. */
 
 	DL_FOREACH(thread->open_devs[CRAS_STREAM_OUTPUT], adev) {
-		/* Only wake up for devices when they don't have streams. */
-		if (!cras_iodev_is_open(adev->dev) || adev->dev->streams)
-			continue;
 		ret++;
 		audio_thread_event_log_data(atlog,
 					    AUDIO_THREAD_DEV_SLEEP_TIME,
@@ -1136,26 +947,6 @@ static void set_odev_wake_times(struct open_dev *dev_list)
 				    &sleep_time);
 		add_timespecs(&adev->wake_ts, &sleep_time);
 	}
-}
-
-static int output_stream_fetch(struct audio_thread *thread)
-{
-	struct open_dev *odev_list = thread->open_devs[CRAS_STREAM_OUTPUT];
-	struct open_dev *adev;
-
-	DL_FOREACH(odev_list, adev) {
-		if (!cras_iodev_is_open(adev->dev))
-			continue;
-		fetch_streams(thread, adev);
-	}
-
-	return 0;
-}
-
-static int wait_pending_output_streams(struct audio_thread *thread)
-{
-	/* TODO(dgreid) - is this needed? */
-	return 0;
 }
 
 /* Gets the master device which the stream is attached to. */
@@ -1473,10 +1264,8 @@ static int send_captured_samples(struct audio_thread *thread)
 /* Reads and/or writes audio sampels from/to the devices. */
 static int stream_dev_io(struct audio_thread *thread)
 {
-	output_stream_fetch(thread);
 	do_capture(thread);
 	send_captured_samples(thread);
-	wait_pending_output_streams(thread);
 	do_playback(thread);
 
 	return 0;
@@ -1495,8 +1284,7 @@ int fill_next_sleep_interval(struct audio_thread *thread, struct timespec *ts)
 	min_ts.tv_nsec = 0;
 	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	add_timespecs(&min_ts, &now);
-	ret = get_next_stream_wake(thread, &min_ts, &now);
-	ret += get_next_dev_wake(thread, &min_ts, &now);
+	ret = get_next_dev_wake(thread, &min_ts, &now);
 	if (timespec_after(&min_ts, &now))
 		subtract_timespecs(&min_ts, &now, ts);
 

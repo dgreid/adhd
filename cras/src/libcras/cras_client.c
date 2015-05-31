@@ -341,29 +341,21 @@ static int send_stream_message(const struct client_stream *stream,
 	return 0;
 }
 
-/* Blocks until there is data to be read from the read_fd or until woken by an
- * incoming "poke" on wake_fd. Up to "len" bytes are read into "buf". */
-static int read_with_wake_fd(int wake_fd, int read_fd, uint8_t *buf, size_t len)
+/* Sleeps for timespec ts interval, or woken by wake_fd. */
+static int sleep_with_wake_fd(int wake_fd, const struct timespec *ts)
 {
-	struct pollfd pollfds[2];
+	struct pollfd pollfd;
 	int nread = 0;
 	int rc;
 	char tmp;
 
-	pollfds[0].fd = read_fd;
-	pollfds[0].events = POLLIN;
-	pollfds[1].fd = wake_fd;
-	pollfds[1].events = POLLIN;
+	pollfd.fd = wake_fd;
+	pollfd.events = POLLIN;
 
-	rc = poll(pollfds, 2, -1);
+	rc = ppoll(&pollfds, 1, ts, NULL);
 	if (rc < 0)
 		return rc;
-	if (pollfds[0].revents & POLLIN) {
-		nread = read(read_fd, buf, len);
-		if (nread != (int)len)
-			return -EIO;
-	}
-	if (pollfds[1].revents & POLLIN) {
+	if (pollfd.revents & POLLIN) {
 		rc = read(wake_fd, &tmp, 1);
 		if (rc < 0)
 			return rc;
@@ -548,14 +540,10 @@ static void *audio_thread(void *arg)
 		cras_set_nice_level(CRAS_CLIENT_NICENESS_LEVEL);
 
 	while (stream->thread.running && !thread_terminated) {
-		num_read = read_with_wake_fd(stream->wake_fds[0],
-					     stream->aud_fd,
-					     (uint8_t *)&aud_msg,
-					     sizeof(aud_msg));
+		num_read = sleep_with_wake_fd(stream->wake_fds[0],
+					      stream->next_wake_ts);
 		if (num_read < 0)
 			return (void *)-EIO;
-		if (num_read == 0)
-			continue;
 
 		switch (aud_msg.id) {
 		case AUDIO_MESSAGE_DATA_READY:
