@@ -273,7 +273,7 @@ static int get_dev_list(struct iodev_list *list,
 
 /* Called when the system volume changes.  Pass the current volume setting to
  * the default output if it is active. */
-void sys_vol_change(void *data)
+void sys_vol_change(void *arc, void *data)
 {
 	struct cras_iodev *dev;
 
@@ -285,7 +285,7 @@ void sys_vol_change(void *data)
 
 /* Called when the system mute state changes.  Pass the current mute setting
  * to the default output if it is active. */
-void sys_mute_change(void *data)
+void sys_mute_change(void *arg, void *data)
 {
 	struct cras_iodev *dev;
 
@@ -434,7 +434,7 @@ static void resume_devs()
 }
 
 /* Called when the system audio is suspended or resumed. */
-void sys_suspend_change(void *data)
+void sys_suspend_change(void *arg, void *data)
 {
 	if (cras_system_get_suspended())
 		suspend_devs();
@@ -444,7 +444,7 @@ void sys_suspend_change(void *data)
 
 /* Called when the system capture gain changes.  Pass the current capture_gain
  * setting to the default input if it is active. */
-void sys_cap_gain_change(void *data)
+void sys_cap_gain_change(void *arg, void *data)
 {
 	struct cras_iodev *dev;
 
@@ -456,7 +456,7 @@ void sys_cap_gain_change(void *data)
 
 /* Called when the system capture mute state changes.  Pass the current capture
  * mute setting to the default input if it is active. */
-void sys_cap_mute_change(void *data)
+void sys_cap_mute_change(void *arg, void *data)
 {
 	struct cras_iodev *dev;
 

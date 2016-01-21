@@ -312,7 +312,7 @@ TEST_F(IoDevTestSuite, SetSuspendResume) {
 
   cras_system_get_suspended_val = 1;
   audio_thread_rm_open_dev_called = 0;
-  suspend_cb(NULL);
+  suspend_cb(NULL, NULL);
   EXPECT_EQ(1, audio_thread_rm_open_dev_called);
   iodev_is_open = 0;
 
@@ -337,7 +337,7 @@ TEST_F(IoDevTestSuite, SetSuspendResume) {
   audio_thread_add_stream_called = 0;
   cras_system_get_suspended_val = 0;
   stream_list_get_ret = stream_list;
-  suspend_cb(NULL);
+  suspend_cb(NULL, NULL);
   EXPECT_EQ(1, audio_thread_add_open_dev_called);
   EXPECT_EQ(2, audio_thread_add_stream_called);
   EXPECT_EQ(&rstream3, audio_thread_add_stream_stream);

@@ -16,10 +16,17 @@ struct cras_alert_cb_list {
 	struct cras_alert_cb_list *prev, *next;
 };
 
+/* A list of data args to callbacks */
+struct cras_alert_data {
+	void *ptr;
+	struct cras_alert_data *prev, *next;
+};
+
 struct cras_alert {
 	int pending;
 	cras_alert_prepare prepare;
 	struct cras_alert_cb_list *callbacks;
+	struct cras_alert_data *data;
 	struct cras_alert *prev, *next;
 };
 
@@ -79,13 +86,27 @@ int cras_alert_rm_callback(struct cras_alert *alert, cras_alert_cb cb,
 static void cras_alert_process(struct cras_alert *alert)
 {
 	struct cras_alert_cb_list *cb;
+	struct cras_alert_data *data;
 
-	if (alert->pending) {
-		alert->pending = 0;
-		if (alert->prepare)
-			alert->prepare(alert);
+	if (!alert->pending)
+		return;
+
+	alert->pending = 0;
+	if (alert->prepare)
+		alert->prepare(alert);
+
+	if (!alert->data) {
 		DL_FOREACH(alert->callbacks, cb)
-			cb->callback(cb->arg);
+			cb->callback(cb->arg, NULL);
+	}
+
+	/* Have data arguments, pass each to the callbacks. */
+	DL_FOREACH(alert->data, data) {
+		DL_FOREACH(alert->callbacks, cb)
+			cb->callback(cb->arg, data->ptr);
+		DL_DELETE(alert->data, data);
+		free(data->ptr);
+		free(data);
 	}
 }
 
@@ -93,6 +114,17 @@ void cras_alert_pending(struct cras_alert *alert)
 {
 	alert->pending = 1;
 	has_alert_pending = 1;
+}
+
+void cras_alert_pending_data(struct cras_alert *alert, void *data)
+{
+	struct cras_alert_data *d;
+
+	alert->pending = 1;
+	has_alert_pending = 1;
+	d = calloc(1, sizeof(*d));
+	d->ptr = data;
+	DL_APPEND(alert->data, d);
 }
 
 void cras_alert_process_all_pending_alerts()

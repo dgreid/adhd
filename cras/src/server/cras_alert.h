@@ -32,8 +32,10 @@ extern "C" {
 struct cras_alert;
 
 /* Callback functions to be notified when settings change. arg is a user
- * provided argument that will be passed back. */
-typedef void (*cras_alert_cb)(void *arg);
+ * provided argument that will be passed back, data is extra info about the
+ * signal if available.
+ */
+typedef void (*cras_alert_cb)(void *arg, void *data);
 typedef void (*cras_alert_prepare)(struct cras_alert *alert);
 
 /* Creates an alert.
@@ -76,6 +78,16 @@ int cras_alert_rm_callback(struct cras_alert *alert, cras_alert_cb cb,
  *    alert - A pointer to the alert.
  */
 void cras_alert_pending(struct cras_alert *alert);
+
+/* Marks an alert as pending. We don't call the callbacks immediately when an
+ * alert becomes pending, but will do that when
+ * cras_alert_process_all_pending_alerts() is called.
+ * Args:
+ *    alert - A pointer to the alert.
+ *    data - A pointer that will be passed to the callback.  This will be freed
+ *      after the callback is run.
+ */
+void cras_alert_pending_data(struct cras_alert *alert, void *data);
 
 /* Processes all alerts that are pending.
  *

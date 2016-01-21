@@ -42,25 +42,25 @@ static void ResetStubData() {
   cras_alsa_card_config_dir = NULL;
 }
 
-static void volume_changed(void *arg) {
+static void volume_changed(void *arg, void *data) {
 }
 
-static void volume_limits_changed(void *arg) {
+static void volume_limits_changed(void *arg, void *data) {
 }
 
-static void volume_limits_changed_2(void *arg) {
+static void volume_limits_changed_2(void *arg, void *data) {
 }
 
-static void capture_gain_changed(void *arg) {
+static void capture_gain_changed(void *arg, void *data) {
 }
 
-static void mute_changed(void *arg) {
+static void mute_changed(void *arg, void *data) {
 }
 
-static void capture_mute_changed(void *arg) {
+static void capture_mute_changed(void *arg, void *data) {
 }
 
-static void capture_mute_changed_2(void *arg) {
+static void capture_mute_changed_2(void *arg, void *data) {
 }
 
 static int add_stub(int fd, void (*cb)(void *data),

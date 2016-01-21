@@ -11,11 +11,12 @@
 
 namespace {
 
-void callback1(void *arg);
-void callback2(void *arg);
+void callback1(void *arg, void *data);
+void callback2(void *arg, void *data);
 void prepare(struct cras_alert *alert);
 
 static int cb1_called = 0;
+static void *cb1_data;
 static int cb2_called = 0;
 static int cb2_set_pending = 0;
 static int prepare_called = 0;
@@ -35,6 +36,48 @@ TEST(Alert, OneCallback) {
   EXPECT_EQ(0, cb1_called);
   cras_alert_process_all_pending_alerts();
   EXPECT_EQ(1, cb1_called);
+  cras_alert_destroy(alert);
+}
+
+TEST(Alert, OneCallbackPost2Call1) {
+  struct cras_alert *alert = cras_alert_create(NULL);
+  cras_alert_add_callback(alert, &callback1, NULL);
+  ResetStub();
+  // Alert twice, callback should only be called once.
+  cras_alert_pending(alert);
+  cras_alert_pending(alert);
+  EXPECT_EQ(0, cb1_called);
+  cras_alert_process_all_pending_alerts();
+  EXPECT_EQ(1, cb1_called);
+  cras_alert_destroy(alert);
+}
+
+TEST(Alert, OneCallbackWithData) {
+  struct cras_alert *alert = cras_alert_create(NULL);
+  char *data = (char *)malloc(3);
+  cras_alert_add_callback(alert, &callback1, NULL);
+  ResetStub();
+  cras_alert_pending_data(alert, data);
+  EXPECT_EQ(0, cb1_called);
+  cras_alert_process_all_pending_alerts();
+  EXPECT_EQ(1, cb1_called);
+  EXPECT_EQ(data, cb1_data);
+  cras_alert_destroy(alert);
+}
+
+TEST(Alert, OneCallbackTwoDataCalledTwice) {
+  struct cras_alert *alert = cras_alert_create(NULL);
+  char *data = (char *)malloc(3);
+  char *data2 = (char *)malloc(3);
+  cras_alert_add_callback(alert, &callback1, NULL);
+  ResetStub();
+  // Callbacks with data should each be called
+  cras_alert_pending_data(alert, data);
+  cras_alert_pending_data(alert, data2);
+  EXPECT_EQ(0, cb1_called);
+  cras_alert_process_all_pending_alerts();
+  EXPECT_EQ(2, cb1_called);
+  EXPECT_EQ(data2, cb1_data);
   cras_alert_destroy(alert);
 }
 
@@ -128,12 +171,13 @@ TEST(Alert, TwoAlerts) {
   cras_alert_destroy_all();
 }
 
-void callback1(void *arg)
+void callback1(void *arg, void *data)
 {
   cb1_called++;
+  cb1_data = data;
 }
 
-void callback2(void *arg)
+void callback2(void *arg, void *data)
 {
   cb2_called++;
   if (cb2_set_pending) {
