@@ -747,6 +747,38 @@ int cras_client_set_hotword_model(struct cras_client *client,
 				  cras_node_id_t node_id,
 				  const char *model_name);
 
+/*
+ * Set system state information callbacks.
+ */
+void cras_client_output_volume_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int32_t volume));
+void cras_client_output_mute_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int muted, int user_muted));
+void cras_client_input_gain_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int32_t gain));
+void cras_client_input_mute_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int muted));
+void cras_client_node_attr_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   enum ionode_attr, int32_t value));
+void cras_client_active_output_node_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id));
+void cras_client_active_input_node_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id));
+void cras_client_output_node_volume_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   int32_t volume));
+void cras_client_node_left_right_swapped_changed_callback(
+		struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   int swapped));
+void cras_client_input_node_gain_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   int32_t gain));
+void cras_client_number_of_active_streams_changed_callback(
+		struct cras_client *client,
+		void (*cb)(struct cras_client *, int32_t num_active_streams));
+
 #ifdef __cplusplus
 }
 #endif

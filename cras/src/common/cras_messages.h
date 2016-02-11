@@ -48,6 +48,7 @@ enum CRAS_SERVER_MESSAGE_ID {
 	CRAS_CONFIG_GLOBAL_REMIX,
 	CRAS_SERVER_GET_HOTWORD_MODELS,
 	CRAS_SERVER_SET_HOTWORD_MODEL,
+	CRAS_SERVER_REGISTER_STATUS_NOTIFICATION,
 };
 
 enum CRAS_CLIENT_MESSAGE_ID {
@@ -56,6 +57,18 @@ enum CRAS_CLIENT_MESSAGE_ID {
 	CRAS_CLIENT_STREAM_CONNECTED,
 	CRAS_CLIENT_AUDIO_DEBUG_INFO_READY,
 	CRAS_CLIENT_GET_HOTWORD_MODELS_READY,
+	/* System status messages */
+	CRAS_CLIENT_OUTPUT_VOLUME_CHANGED,
+	CRAS_CLIENT_OUTPUT_MUTE_CHANGED,
+	CRAS_CLIENT_INPUT_GAIN_CHANGED,
+	CRAS_CLIENT_INPUT_MUTE_CHANGED,
+	CRAS_CLIENT_NODE_ATTR_CHANGED,
+	CRAS_CLIENT_ACTIVE_OUTPUT_NODE_CHANGED,
+	CRAS_CLIENT_ACTIVE_INPUT_NODE_CHANGED,
+	CRAS_CLIENT_OUTPUT_NODE_VOLUME_CHANGED,
+	CRAS_CLIENT_NODE_LEFT_RIGHT_SWAPPED_CHANGED,
+	CRAS_CLIENT_INPUT_NODE_GAIN_CHANGED,
+	CRAS_CLIENT_NUMBER_OF_ACTIVE_STREAMS_CHANGED,
 };
 
 /* Messages that control the server. These are sent from the client to affect
@@ -410,6 +423,19 @@ static inline void cras_fill_set_hotword_model_message(
 }
 
 
+struct __attribute__ ((__packed__)) cras_register_notification {
+		struct cras_server_message header;
+		uint32_t msg_id;
+};
+static inline void cras_fill_register_notification_message(
+		struct cras_register_notification *m,
+		enum CRAS_CLIENT_MESSAGE_ID msg_id)
+{
+	m->header.id = CRAS_SERVER_REGISTER_STATUS_NOTIFICATION;
+	m->header.length = sizeof(*m);
+	m->msg_id = msg_id;
+}
+
 /*
  * Messages sent from server to client.
  */
@@ -480,6 +506,68 @@ static inline void cras_fill_client_get_hotword_models_ready(
 	m->header.length = sizeof(*m) + hotword_models_size;
 	m->hotword_models_size = hotword_models_size;
 	memcpy(m->hotword_models, hotword_models, hotword_models_size);
+}
+
+/* System status messages sent from server to client when state changes. */
+struct __attribute__ ((__packed__)) cras_client_volume_gain_changed {
+	struct cras_client_message header;
+	int32_t gain;
+};
+static inline void cras_fill_client_system_volume_changed(
+		struct cras_client_volume_gain_changed *m, int32_t volume)
+{
+	m->header.id = CRAS_CLIENT_OUTPUT_VOLUME_CHANGED;
+	m->header.length = sizeof(*m);
+	m->gain = volume;
+}
+static inline void cras_fill_client_input_gain_changed(
+		struct cras_client_volume_gain_changed *m, int32_t gain)
+{
+	m->header.id = CRAS_CLIENT_INPUT_GAIN_CHANGED;
+	m->header.length = sizeof(*m);
+	m->gain = gain;
+}
+
+struct __attribute__ ((__packed__)) cras_client_system_mute_changed {
+	struct cras_client_message header;
+	int32_t system_muted;
+	int32_t user_muted;
+};
+static inline void cras_fill_client_system_ouput_mute_changed(
+		struct cras_client_system_mute_changed *m, int32_t muted,
+		int32_t user_muted)
+{
+	m->header.id = CRAS_CLIENT_OUTPUT_VOLUME_CHANGED;
+	m->header.length = sizeof(*m);
+	m->system_muted = muted;
+	m->user_muted = user_muted;
+}
+static inline void cras_fill_client_input_mute_changed(
+		struct cras_client_system_mute_changed *m, int32_t muted)
+{
+	m->header.id = CRAS_CLIENT_INPUT_MUTE_CHANGED;
+	m->header.length = sizeof(*m);
+	m->system_muted = muted;
+	m->user_muted = muted;
+}
+
+struct __attribute__ ((__packed__)) cras_client_node_attr_changed {
+	struct cras_client_message header;
+	cras_node_id_t node_id;
+	int32_t attr;
+	int32_t value;
+};
+static inline void cras_fill_node_attr_changed(
+		struct cras_client_node_attr_changed *m,
+		cras_node_id_t node_id,
+		enum ionode_attr attr,
+		int value)
+{
+	m->header.id = CRAS_CLIENT_NODE_ATTR_CHANGED;
+	m->header.length = sizeof(*m);
+	m->node_id = node_id;
+	m->attr = attr;
+	m->value = value;
 }
 
 /*

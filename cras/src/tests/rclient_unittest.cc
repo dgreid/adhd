@@ -40,6 +40,17 @@ static unsigned int stream_list_disconnect_stream_called;
 static unsigned int cras_iodev_list_rm_input_called;
 static unsigned int cras_iodev_list_rm_output_called;
 static struct cras_rstream dummy_rstream;
+static size_t sys_get_volume_called;
+static size_t sys_get_volume_return_value;
+static size_t sys_get_capture_gain_called;
+static long sys_get_capture_gain_return_value;
+static size_t sys_get_mute_called;
+static int sys_get_mute_return_value;
+static size_t sys_get_capture_mute_called;
+static int sys_get_capture_mute_return_value;
+static int remove_volume_changed_cb_called;
+static int remove_capture_gain_changed_cb_called;
+
 
 void ResetStubData() {
   cras_rstream_create_return = 0;
@@ -66,6 +77,8 @@ void ResetStubData() {
   stream_list_disconnect_stream_called = 0;
   cras_iodev_list_rm_output_called = 0;
   cras_iodev_list_rm_input_called = 0;
+  remove_volume_changed_cb_called = 0;
+  remove_capture_gain_changed_cb_called = 0;
 }
 
 namespace {
@@ -90,6 +103,8 @@ TEST(RClientSuite, CreateSendMessage) {
   EXPECT_EQ(CRAS_CLIENT_CONNECTED, msg.header.id);
 
   cras_rclient_destroy(rclient);
+  EXPECT_EQ(1, remove_volume_changed_cb_called);
+  EXPECT_EQ(1, remove_capture_gain_changed_cb_called);
   close(pipe_fds[0]);
   close(pipe_fds[1]);
 }
@@ -532,6 +547,58 @@ char *cras_iodev_list_get_hotword_models(cras_node_id_t node_id)
 int cras_iodev_list_set_hotword_model(cras_node_id_t id,
               const char *model_name)
 {
+  return 0;
+}
+
+int cras_iodev_list_register_node_attr_changed_cb(cras_alert_cb cb, void *arg)
+{
+  return 0;
+}
+
+int cras_iodev_list_remove_node_attr_changed_cb(cras_alert_cb cb, void *arg)
+{
+  return 0;
+}
+
+size_t cras_system_get_volume()
+{
+  sys_get_volume_called++;
+  return sys_get_volume_return_value;
+}
+
+long cras_system_get_capture_gain()
+{
+  sys_get_capture_gain_called++;
+  return sys_get_capture_gain_return_value;
+}
+
+int cras_system_get_mute()
+{
+  sys_get_mute_called++;
+  return sys_get_mute_return_value;
+}
+
+int cras_system_get_capture_mute()
+{
+  sys_get_capture_mute_called++;
+  return sys_get_capture_mute_return_value;
+}
+
+int cras_system_register_volume_changed_cb(cras_alert_cb cb, void *arg) {
+  return 0;
+}
+
+int cras_system_remove_volume_changed_cb(cras_alert_cb cb, void *arg) {
+  remove_volume_changed_cb_called++;
+  return 0;
+}
+
+int cras_system_register_capture_gain_changed_cb(cras_alert_cb cb, void *arg) {
+  return 0;
+}
+
+int cras_system_remove_capture_gain_changed_cb(cras_alert_cb cb, void *arg) {
+  remove_capture_gain_changed_cb_called++;
   return 0;
 }
 

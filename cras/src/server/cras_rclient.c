@@ -155,6 +155,56 @@ empty_reply:
 	cras_rclient_send_message(client, &msg->header, NULL, 0);
 }
 
+/* Handles node attribute changed events. */
+static void node_attr_changed(void *arg, void *data)
+{
+	struct node_attr_update *u = (struct node_attr_update *)data;
+	struct cras_rclient *client = (struct cras_rclient *)arg;
+	struct cras_client_node_attr_changed msg;
+
+	cras_fill_node_attr_changed(&msg, u->node_id, u->attr, u->value);
+	cras_rclient_send_message(client, &msg.header, NULL, 0);
+}
+
+static void sys_output_volume_changed(void *arg, void *data)
+{
+	struct cras_client_volume_gain_changed msg;
+	struct cras_rclient *client = (struct cras_rclient *)arg;
+
+	cras_fill_client_system_volume_changed(&msg, cras_system_get_volume());
+	cras_rclient_send_message(client, &msg.header, NULL, 0);
+}
+
+static void sys_capture_gain_changed(void *arg, void *data)
+{
+	struct cras_client_volume_gain_changed msg;
+	struct cras_rclient *client = (struct cras_rclient *)arg;
+
+	cras_fill_client_input_gain_changed(&msg, cras_system_get_volume());
+	cras_rclient_send_message(client, &msg.header, NULL, 0);
+}
+
+static void register_for_notification(struct cras_rclient *client,
+				      enum CRAS_CLIENT_MESSAGE_ID msg_id)
+{
+	switch (msg_id) {
+	case CRAS_CLIENT_OUTPUT_VOLUME_CHANGED:
+		cras_system_register_volume_changed_cb(
+				sys_output_volume_changed, client);
+		break;
+	case CRAS_CLIENT_INPUT_GAIN_CHANGED:
+		cras_system_register_capture_gain_changed_cb(
+				sys_capture_gain_changed, client);
+		break;
+	case CRAS_CLIENT_NODE_ATTR_CHANGED:
+		cras_iodev_list_register_node_attr_changed_cb(
+				node_attr_changed, client);
+		break;
+	default:
+		break;
+	}
+}
+
 /*
  * Exported Functions.
  */
@@ -184,6 +234,10 @@ struct cras_rclient *cras_rclient_create(int fd, size_t id)
 /* Removes all streams that the client owns and destroys it. */
 void cras_rclient_destroy(struct cras_rclient *client)
 {
+	cras_iodev_list_remove_node_attr_changed_cb(node_attr_changed, client);
+	cras_system_remove_volume_changed_cb(sys_output_volume_changed, client);
+	cras_system_remove_capture_gain_changed_cb(sys_capture_gain_changed,
+						   client);
 	stream_list_rm_all_client_streams(
 			cras_iodev_list_get_stream_list(), client);
 	free(client);
@@ -321,6 +375,12 @@ int cras_rclient_message_from_client(struct cras_rclient *client,
 			(const struct cras_set_hotword_model *)msg;
 		cras_iodev_list_set_hotword_model(m->node_id,
 						  m->model_name);
+		break;
+	}
+	case CRAS_SERVER_REGISTER_STATUS_NOTIFICATION: {
+		const struct cras_register_notification *m =
+			(struct cras_register_notification *)msg;
+		register_for_notification(client, m->msg_id);
 		break;
 	}
 	default:

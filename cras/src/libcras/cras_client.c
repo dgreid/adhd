@@ -151,6 +151,45 @@ struct client_stream {
 	struct client_stream *prev, *next;
 };
 
+/* Callbacks for system state changes.
+ * output_volume_changed - New system volume.
+ * output_mute_changed - Output mute state changed.
+ * input_gain_changed - System-wide input gain changed.
+ * input_mute_changed - System-wide input mute changed.
+ * node_attr_changed - An attribute of a node has changed.
+ * active_output_node_changed - Active output node has changed.
+ * active_input_node_changed - Active input node has changed.
+ * output_node_volume_changed - The given node's volume has changed.
+ * node_left_right_swapped_changed - Swap state for the given node.
+ * input_node_gain_changed - Gain of the given input node.
+ * number_of_active_streams_changed - A stream has been added or removed.
+ */
+struct client_system_state_callbacks {
+	void (*output_volume_changed)(struct cras_client *client,
+				      int32_t volume);
+	void (*output_mute_changed)(struct cras_client *client, int muted,
+				    int user_muted);
+	void (*input_gain_changed)(struct cras_client *client, int32_t gain);
+	void (*input_mute_changed)(struct cras_client *client, int muted);
+	void (*node_attr_changed)(struct cras_client *client,
+				  cras_node_id_t node_id, enum ionode_attr attr,
+				  int32_t value);
+	void (*active_output_node_changed)(struct cras_client *client,
+					   cras_node_id_t node_id);
+	void (*active_input_node_changed)(struct cras_client *client,
+					  cras_node_id_t node_id);
+	void (*output_node_volume_changed)(struct cras_client *client,
+					   cras_node_id_t node_id,
+					   int32_t volume);
+	void (*node_left_right_swapped_changed)(struct cras_client *client,
+						cras_node_id_t node_id,
+						int swapped);
+	void (*input_node_gain_changed)(struct cras_client *client,
+					cras_node_id_t node_id, int32_t gain);
+	void (*number_of_active_streams_changed)(struct cras_client *client,
+						 int32_t num_active_streams);
+};
+
 /* Represents a client used to communicate with the audio server.
  * id - Unique identifier for this client, negative until connected.
  * server_fd Incoming messages from server.
@@ -169,6 +208,7 @@ struct client_stream {
  * server_err_cb - Function to call when failed to read messages from server.
  * server_err_user_arg - User argument for server_err_cb.
  * thread_priority_cb - Function to call for setting audio thread priority.
+ * state_callbacks - Functions to call when system state changes.
  */
 struct cras_client {
 	int id;
@@ -187,6 +227,7 @@ struct cras_client {
 	cras_server_error_cb_t server_err_cb;
 	void *server_err_user_arg;
 	cras_thread_priority_cb_t thread_priority_cb;
+	struct client_system_state_callbacks state_callbacks;
 };
 
 /*
@@ -999,6 +1040,16 @@ static int handle_message_from_server(struct cras_client *client)
 			(struct cras_client_get_hotword_models_ready *)msg;
 		cras_client_get_hotword_models_ready(client,
 				(const char *)cmsg->hotword_models);
+		break;
+	}
+	case CRAS_CLIENT_NODE_ATTR_CHANGED: {
+		struct cras_client_node_attr_changed *cmsg =
+			(struct cras_client_node_attr_changed *)msg;
+		if (client->state_callbacks.node_attr_changed)
+			client->state_callbacks.node_attr_changed(
+					client, cmsg->node_id,
+					(enum ionode_attr)cmsg->attr,
+					cmsg->value);
 		break;
 	}
 	default:
@@ -2216,4 +2267,82 @@ int cras_client_set_hotword_model(struct cras_client *client,
 
 	cras_fill_set_hotword_model_message(&msg, node_id, model_name);
 	return write_message_to_server(client, &msg.header);
+}
+
+void cras_client_output_volume_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int32_t volume))
+{
+	client->state_callbacks.output_volume_changed = cb;
+}
+
+void cras_client_output_mute_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int muted, int user_muted))
+{
+	client->state_callbacks.output_mute_changed = cb;
+}
+
+void cras_client_input_gain_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int32_t gain))
+{
+	client->state_callbacks.input_gain_changed = cb;
+}
+
+void cras_client_input_mute_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, int muted))
+{
+	client->state_callbacks.input_mute_changed = cb;
+}
+
+void cras_client_node_attr_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   enum ionode_attr, int32_t value))
+{
+	struct cras_register_notification msg;
+
+	client->state_callbacks.node_attr_changed = cb;
+
+	cras_fill_register_notification_message(
+			&msg, CRAS_CLIENT_NODE_ATTR_CHANGED);
+	cras_send_with_fds(client->server_fd, &msg, sizeof(msg), NULL, 0);
+}
+
+void cras_client_active_output_node_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id))
+{
+	client->state_callbacks.active_output_node_changed = cb;
+}
+
+void cras_client_active_input_node_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id))
+{
+	client->state_callbacks.active_input_node_changed = cb;
+}
+
+void cras_client_output_node_volume_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   int32_t volume))
+{
+	client->state_callbacks.output_node_volume_changed = cb;
+}
+
+void cras_client_node_left_right_swapped_changed_callback(
+		struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   int swapped))
+{
+	client->state_callbacks.node_left_right_swapped_changed = cb;
+}
+
+void cras_client_input_node_gain_changed_callback(struct cras_client *client,
+		void (*cb)(struct cras_client *, cras_node_id_t node_id,
+			   int32_t gain))
+{
+	client->state_callbacks.input_node_gain_changed = cb;
+}
+
+void cras_client_number_of_active_streams_changed_callback(
+		struct cras_client *client,
+		void (*cb)(struct cras_client *, int32_t num_active_streams))
+{
+	client->state_callbacks.number_of_active_streams_changed = cb;
 }
