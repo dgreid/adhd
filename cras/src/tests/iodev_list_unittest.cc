@@ -48,6 +48,7 @@ static unsigned int set_node_attr_called;
 static int cras_alert_create_called;
 static int cras_alert_destroy_called;
 static int cras_alert_pending_called;
+static int cras_alert_pending_data_called;
 static cras_iodev *audio_thread_remove_streams_active_dev;
 static cras_iodev *audio_thread_set_active_dev_val;
 static int audio_thread_set_active_dev_called;
@@ -205,6 +206,7 @@ class IoDevTestSuite : public testing::Test {
       cras_alert_create_called = 0;
       cras_alert_destroy_called = 0;
       cras_alert_pending_called = 0;
+      cras_alert_pending_data_called = 0;
       is_open_ = 0;
       audio_thread_rm_open_dev_called = 0;
       audio_thread_add_open_dev_called = 0;
@@ -660,7 +662,7 @@ TEST_F(IoDevTestSuite, NodesChangedNotification) {
   EXPECT_EQ(0, cras_alert_create_called);
   cras_iodev_list_init();
   /* One for nodes changed and one for active node changed */
-  EXPECT_EQ(2, cras_alert_create_called);
+  EXPECT_EQ(3, cras_alert_create_called);
 
   EXPECT_EQ(0, cras_alert_pending_called);
   cras_iodev_list_notify_nodes_changed();
@@ -668,7 +670,7 @@ TEST_F(IoDevTestSuite, NodesChangedNotification) {
 
   EXPECT_EQ(0, cras_alert_destroy_called);
   cras_iodev_list_deinit();
-  EXPECT_EQ(2, cras_alert_destroy_called);
+  EXPECT_EQ(3, cras_alert_destroy_called);
 }
 
 // Test callback function for left right swap mode is set and called.
@@ -695,6 +697,7 @@ TEST_F(IoDevTestSuite, IodevListSetNodeAttr) {
                                      IONODE_ATTR_PLUGGED, 1);
   EXPECT_LE(rc, 0);
   EXPECT_EQ(0, set_node_attr_called);
+  EXPECT_EQ(0, cras_alert_pending_data_called);
 
   // Add two device, each with one node.
   d1_.direction = CRAS_STREAM_INPUT;
@@ -720,6 +723,7 @@ TEST_F(IoDevTestSuite, IodevListSetNodeAttr) {
                                      IONODE_ATTR_PLUGGED, 1);
   EXPECT_EQ(rc, 0);
   EXPECT_EQ(1, set_node_attr_called);
+  EXPECT_EQ(1, cras_alert_pending_data_called);
 }
 
 TEST_F(IoDevTestSuite, AddActiveNode) {
@@ -991,6 +995,10 @@ int cras_alert_rm_callback(struct cras_alert *alert, cras_alert_cb cb,
 
 void cras_alert_pending(struct cras_alert *alert) {
   cras_alert_pending_called++;
+}
+
+void cras_alert_pending_data(struct cras_alert *alert, void *data) {
+  cras_alert_pending_data_called++;
 }
 
 void cras_alert_destroy(struct cras_alert *alert) {

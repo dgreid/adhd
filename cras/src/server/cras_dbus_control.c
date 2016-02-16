@@ -1061,6 +1061,7 @@ void cras_dbus_control_start(DBusConnection *conn)
 	cras_system_register_active_streams_changed_cb(
 		signal_num_active_streams_changed, 0);
 	cras_iodev_list_register_nodes_changed_cb(signal_nodes_changed, 0);
+	cras_iodev_list_register_node_attr_changed_cb(signal_nodes_changed, 0);
 	cras_iodev_list_register_active_node_changed_cb(
 		signal_active_node_changed, 0);
 	cras_iodev_list_set_node_volume_callbacks(
@@ -1081,6 +1082,7 @@ void cras_dbus_control_stop()
 	cras_system_remove_active_streams_changed_cb(
 		signal_num_active_streams_changed, 0);
 	cras_iodev_list_remove_nodes_changed_cb(signal_nodes_changed, 0);
+	cras_iodev_list_remove_node_attr_changed_cb(signal_nodes_changed, 0);
 	cras_iodev_list_remove_active_node_changed_cb(
 		signal_active_node_changed, 0);
 

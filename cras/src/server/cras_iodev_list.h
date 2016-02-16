@@ -25,6 +25,13 @@ struct stream_list;
 typedef void (*node_volume_callback_t)(cras_node_id_t, int);
 typedef void (*node_left_right_swapped_callback_t)(cras_node_id_t, int);
 
+/* Information about a node attribute change. */
+struct node_attr_update {
+	cras_node_id_t node_id;
+	enum ionode_attr attr;
+	int value;
+};
+
 /* Device enabled/disabled callback.
  * enabled=1 when a device is enabled, enabled=0 when a device is disabled.
  */
@@ -138,6 +145,20 @@ int cras_iodev_list_register_nodes_changed_cb(cras_alert_cb cb, void *arg);
  *    arg - Value to pass back to callback.
  */
 int cras_iodev_list_remove_nodes_changed_cb(cras_alert_cb cb, void *arg);
+
+/* Adds a callback to call when the node attributes change.
+ * Args:
+ *    cb - Function to call when there is a change.
+ *    arg - Value to pass back to callback.
+ */
+int cras_iodev_list_register_node_attr_changed_cb(cras_alert_cb cb, void *arg);
+
+/* Removes a callback to call when the node attributes change.
+ * Args:
+ *    cb - Function to call when there is a change.
+ *    arg - Value to pass back to callback.
+ */
+int cras_iodev_list_remove_node_attr_changed_cb(cras_alert_cb cb, void *arg);
 
 /* Notify that nodes are added/removed. */
 void cras_iodev_list_notify_nodes_changed();

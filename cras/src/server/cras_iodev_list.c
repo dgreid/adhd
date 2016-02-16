@@ -50,6 +50,8 @@ static struct cras_iodev *fallback_devs[CRAS_NUM_DIRECTIONS];
 static uint32_t next_iodev_idx = MAX_SPECIAL_DEVICE_IDX;
 /* Called when the nodes are added/removed. */
 static struct cras_alert *nodes_changed_alert;
+/* Called when a node attribute changes. */
+static struct cras_alert *node_attr_alert;
 /* Called when the active output/input is changed */
 static struct cras_alert *active_node_changed_alert;
 /* Call when the volume of a node changes. */
@@ -661,6 +663,7 @@ void cras_iodev_list_init()
 	cras_system_register_capture_gain_changed_cb(sys_cap_gain_change, NULL);
 	cras_system_register_capture_mute_changed_cb(sys_cap_mute_change, NULL);
 	nodes_changed_alert = cras_alert_create(nodes_changed_prepare);
+	node_attr_alert = cras_alert_create(nodes_changed_prepare);
 	active_node_changed_alert = cras_alert_create(
 		active_node_changed_prepare);
 
@@ -701,8 +704,10 @@ void cras_iodev_list_deinit()
 	cras_system_remove_capture_gain_changed_cb(sys_cap_gain_change, NULL);
 	cras_system_remove_capture_mute_changed_cb(sys_cap_mute_change, NULL);
 	cras_alert_destroy(nodes_changed_alert);
+	cras_alert_destroy(node_attr_alert);
 	cras_alert_destroy(active_node_changed_alert);
 	nodes_changed_alert = NULL;
+	node_attr_alert = NULL;
 	active_node_changed_alert = NULL;
 	audio_thread_destroy(audio_thread);
 	stream_list_destroy(stream_list);
@@ -924,9 +929,31 @@ int cras_iodev_list_remove_nodes_changed_cb(cras_alert_cb cb, void *arg)
 	return cras_alert_rm_callback(nodes_changed_alert, cb, arg);
 }
 
+int cras_iodev_list_register_node_attr_changed_cb(cras_alert_cb cb, void *arg)
+{
+	return cras_alert_add_callback(node_attr_alert, cb, arg);
+}
+
+int cras_iodev_list_remove_node_attr_changed_cb(cras_alert_cb cb, void *arg)
+{
+	return cras_alert_rm_callback(node_attr_alert, cb, arg);
+}
+
 void cras_iodev_list_notify_nodes_changed()
 {
 	cras_alert_pending(nodes_changed_alert);
+}
+
+static void cras_iodev_list_notify_node_attr_changed(cras_node_id_t node_id,
+						     enum ionode_attr attr,
+						     int value)
+{
+	struct node_attr_update *new_attr = calloc(1, sizeof(*new_attr));
+
+	new_attr->node_id = node_id;
+	new_attr->attr = attr;
+	new_attr->value = value;
+	cras_alert_pending_data(node_attr_alert, new_attr);
 }
 
 static void nodes_changed_prepare(struct cras_alert *alert)
@@ -1011,6 +1038,7 @@ int cras_iodev_list_set_node_attr(cras_node_id_t node_id,
 		return -EINVAL;
 
 	rc = cras_iodev_set_node_attr(node, attr, value);
+	cras_iodev_list_notify_node_attr_changed(node_id, attr, value);
 	return rc;
 }
 
