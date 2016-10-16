@@ -542,6 +542,9 @@ static int possibly_close_enabled_devs(enum CRAS_STREAM_DIRECTION dir)
 		/* Allow output devs to drain before closing. */
 		clock_gettime(CLOCK_MONOTONIC_RAW, &edev->dev->idle_timeout);
 		add_timespecs(&edev->dev->idle_timeout, &idle_timeout_interval);
+		if (idle_timer)
+			cras_tm_cancel_timer(cras_system_state_get_tm(),
+					     idle_timer);
 		idle_dev_check(NULL, NULL);
 	}
 
