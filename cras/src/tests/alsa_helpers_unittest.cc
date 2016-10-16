@@ -10,12 +10,15 @@ extern "C" {
 #include "cras_alsa_helpers.c"
 }
 
+#if 0
 static int snd_pcm_sw_params_set_tstamp_type_called;
 static int snd_pcm_sw_params_set_tstamp_mode_called;
 static snd_pcm_uframes_t snd_pcm_htimestamp_avail_ret_val;
 static timespec snd_pcm_htimestamp_tstamp_ret_val;
 static std::vector<int> snd_pcm_sw_params_ret_vals;
+#endif
 
+#if 0
 static void ResetStubData() {
   snd_pcm_sw_params_set_tstamp_type_called = 0;
   snd_pcm_sw_params_set_tstamp_mode_called = 0;
@@ -24,6 +27,7 @@ static void ResetStubData() {
   snd_pcm_htimestamp_tstamp_ret_val.tv_nsec = 0;
   snd_pcm_sw_params_ret_vals.clear();
 }
+#endif
 
 namespace {
 
@@ -163,6 +167,7 @@ TEST(AlsaHelper, MatchChannelMapCapability51) {
   cras_audio_format_destroy(fmt);
 }
 
+#if 0
 TEST(AlsaHelper, Htimestamp) {
   snd_pcm_t *dummy_handle = reinterpret_cast<snd_pcm_t*>(0x1);
   snd_pcm_uframes_t used;
@@ -203,6 +208,7 @@ TEST(AlsaHelper, Htimestamp) {
   EXPECT_EQ(tstamp.tv_sec, snd_pcm_htimestamp_tstamp_ret_val.tv_sec);
   EXPECT_EQ(tstamp.tv_nsec, snd_pcm_htimestamp_tstamp_ret_val.tv_nsec);
 }
+#endif
 
 } // namespace
 
@@ -234,6 +240,7 @@ int snd_pcm_sw_params_set_period_event(snd_pcm_t *pcm,
   return 0;
 }
 
+#if 0
 int snd_pcm_sw_params_set_tstamp_mode(snd_pcm_t *pcm,
                                       snd_pcm_sw_params_t *params,
                                       snd_pcm_tstamp_t val) {
@@ -268,6 +275,7 @@ int snd_pcm_htimestamp(snd_pcm_t *pcm, snd_pcm_uframes_t *avail,
   *tstamp = snd_pcm_htimestamp_tstamp_ret_val;
   return 0;
 }
+#endif
 
 }
 

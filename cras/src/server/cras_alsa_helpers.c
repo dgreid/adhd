@@ -605,7 +605,7 @@ int cras_alsa_set_swparams(snd_pcm_t *handle, int *enable_htimestamp)
 		syslog(LOG_ERR, "set_period_event: %s\n", snd_strerror(err));
 		return err;
 	}
-
+#if 0
 	if (*enable_htimestamp) {
 		/* Use MONOTONIC_RAW time-stamps. */
 		err = snd_pcm_sw_params_set_tstamp_type(
@@ -624,11 +624,13 @@ int cras_alsa_set_swparams(snd_pcm_t *handle, int *enable_htimestamp)
 			return err;
 		}
 	}
+#endif
 
 	/* This hack is required because ALSA-LIB does not provide any way to
 	 * detect whether MONOTONIC_RAW timestamps are supported by the kernel.
 	 * In ALSA-LIB, the code checks the hardware protocol version. */
 	err = snd_pcm_sw_params(handle, swparams);
+#if 0
 	if (err == -EINVAL && *enable_htimestamp) {
 		*enable_htimestamp = 0;
 		syslog(LOG_WARNING,
@@ -652,6 +654,7 @@ int cras_alsa_set_swparams(snd_pcm_t *handle, int *enable_htimestamp)
 
 		err = snd_pcm_sw_params(handle, swparams);
 	}
+#endif
 
 	if (err < 0) {
 		syslog(LOG_ERR, "sw_params: %s\n", snd_strerror(err));
