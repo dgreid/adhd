@@ -7,6 +7,7 @@
 #include "cras_util.h"
 #include "utlist.h"
 
+#include <stdbool.h>
 #include <time.h>
 
 /* Represents an armed timer.
@@ -19,6 +20,7 @@ struct cras_timer {
 	struct timespec ts;
 	void (*cb)(struct cras_timer *t, void *data);
 	void *cb_data;
+	bool armed;
 	struct cras_timer *next, *prev;
 };
 
@@ -52,6 +54,49 @@ static inline int timespec_sooner(const struct timespec *a,
 }
 
 /* Exported Interface. */
+
+int cras_tm_set_timer(struct cras_tm *tm,
+		      struct cras_timer **t,
+		      unsigned int ms,
+		      void (*cb)(struct cras_timer *t, void *data),
+		      void *cb_data)
+{
+	struct cras_timer *new_timer;
+	if (*t) {
+		new_timer = *t;
+	} else {
+		new_timer = calloc(1, sizeof(*new_timer));
+		if (!new_timer)
+			return -ENOMEM;
+	}
+
+	new_timer->cb = cb;
+	new_timer->cb_data = cb_data;
+
+	clock_gettime(CLOCK_MONOTONIC_RAW, &new_timer->ts);
+	add_ms_ts(&new_timer->ts, ms);
+
+	DL_APPEND(tm->timers, new_timer);
+	new_timer->armed = true;
+	*t = new_timer;
+
+	return 0;
+}
+
+void cras_tm_clear_timer(struct cras_tm *tm, struct cras_timer *t)
+{
+	if (!t->armed)
+		return;
+	DL_DELETE(tm->timers, t);
+	t->armed = false;
+}
+
+void cras_tm_free_timer(struct cras_timer *t)
+{
+	if (t->armed)
+		DL_DELETE(tm->timers, t);
+	free(t);
+}
 
 struct cras_timer *cras_tm_create_timer(
 		struct cras_tm *tm,
@@ -93,7 +138,6 @@ void cras_tm_deinit(struct cras_tm *tm)
 
 	DL_FOREACH(tm->timers, t) {
 		DL_DELETE(tm->timers, t);
-		free(t);
 	}
 	free(tm);
 }
@@ -131,9 +175,10 @@ void cras_tm_call_callbacks(struct cras_tm *tm)
 
 	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
-	DL_FOREACH(tm->timers, t)
+	DL_FOREACH(tm->timers, t) {
 		if (timespec_sooner(&t->ts, &now)) {
 			t->cb(t, t->cb_data);
-			cras_tm_cancel_timer(tm, t);
+			DL_DELETE(tm->timers, t);
 		}
+	}
 }

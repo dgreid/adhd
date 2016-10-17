@@ -276,11 +276,11 @@ void cras_bt_device_destroy(struct cras_bt_device *device)
 	DL_DELETE(devices, device);
 
 	if (device->conn_watch_timer)
-		cras_tm_cancel_timer(tm, device->conn_watch_timer);
+		cras_tm_free_timer(tm, device->conn_watch_timer);
 	if (device->switch_profile_timer)
-		cras_tm_cancel_timer(tm, device->switch_profile_timer);
+		cras_tm_free_timer(tm, device->switch_profile_timer);
 	if (device->suspend_timer)
-		cras_tm_cancel_timer(tm, device->suspend_timer);
+		cras_tm_free_timer(tm, device->suspend_timer);
 	free(device->object_path);
 	free(device->address);
 	free(device->name);
@@ -487,7 +487,7 @@ int cras_bt_device_audio_gateway_initialized(struct cras_bt_device *device)
 		}
 		if (device->conn_watch_timer) {
 			tm = cras_system_state_get_tm();
-			cras_tm_cancel_timer(tm, device->conn_watch_timer);
+			cras_tm_free_timer(tm, device->conn_watch_timer);
 			device->conn_watch_timer = NULL;
 		}
 	} else {
@@ -611,9 +611,9 @@ arm_retry_timer:
 
 	if (--device->conn_watch_retries) {
 		tm = cras_system_state_get_tm();
-		device->conn_watch_timer = cras_tm_create_timer(tm,
-				CONN_WATCH_PERIOD_MS,
-				bt_device_conn_watch_cb, device);
+		cras_tm_set_timer(tm, &device->conn_watch_timer,
+				  CONN_WATCH_PERIOD_MS,
+				  bt_device_conn_watch_cb, device);
 	} else {
 		syslog(LOG_ERR, "Connection watch timeout.");
 		bt_device_schedule_suspend(device, 0);
@@ -626,12 +626,12 @@ static void cras_bt_device_start_new_conn_watch_timer(
 	struct cras_tm *tm = cras_system_state_get_tm();
 
 	if (device->conn_watch_timer) {
-		cras_tm_cancel_timer(tm, device->conn_watch_timer);
+		cras_tm_clear_timer(tm, device->conn_watch_timer);
 	}
 	device->conn_watch_retries = CONN_WATCH_MAX_RETRIES;
-	device->conn_watch_timer = cras_tm_create_timer(tm,
-			CONN_WATCH_PERIOD_MS,
-			bt_device_conn_watch_cb, device);
+	cras_tm_set_timer(tm, &device->conn_watch_timer,
+			  CONN_WATCH_PERIOD_MS,
+			  bt_device_conn_watch_cb, device);
 }
 
 static void cras_bt_device_set_connected(struct cras_bt_device *device,
@@ -650,7 +650,7 @@ static void cras_bt_device_set_connected(struct cras_bt_device *device,
 	if (device->connected) {
 		cras_bt_device_start_new_conn_watch_timer(device);
 	} else if (device->conn_watch_timer) {
-		cras_tm_cancel_timer(tm, device->conn_watch_timer);
+		cras_tm_free_timer(tm, device->conn_watch_timer);
 		device->conn_watch_timer = NULL;
 	}
 }
@@ -1016,11 +1016,10 @@ static void bt_device_switch_profile_with_delay(struct cras_bt_device *device,
 	struct cras_tm *tm = cras_system_state_get_tm();
 
 	if (device->switch_profile_timer) {
-		cras_tm_cancel_timer(tm, device->switch_profile_timer);
-		device->switch_profile_timer = NULL;
+		cras_tm_clear_timer(tm, device->switch_profile_timer);
 	}
-	device->switch_profile_timer = cras_tm_create_timer(
-			tm, delay_ms, profile_switch_delay_cb, device);
+	cras_tm_create_timer(tm, device->switch_profile_timer, delay_ms,
+			     profile_switch_delay_cb, device);
 }
 
 /* Switches associated bt iodevs to use the active profile. This is

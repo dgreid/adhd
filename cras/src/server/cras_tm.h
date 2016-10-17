@@ -30,8 +30,17 @@ struct cras_timer *cras_tm_create_timer(
 		void (*cb)(struct cras_timer *t, void *data),
 		void *cb_data);
 
+int cras_tm_set_timer(struct cras_tm *tm,
+		      struct cras_timer **t,
+		      unsigned int ms,
+		      void (*cb)(struct cras_timer *t, void *data),
+		      void *cb_data);
+
 /* Deletes a timer returned from cras_tm_create_timer. */
 void cras_tm_cancel_timer(struct cras_tm *tm, struct cras_timer *t);
+
+void cras_tm_clear_timer(struct cras_tm *tm, struct cras_timer *t);
+void cras_tm_free_timer(struct cras_timer *t);
 
 /* Interface for system to create the timer manager. */
 struct cras_tm *cras_tm_init();

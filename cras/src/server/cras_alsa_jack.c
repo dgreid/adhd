@@ -184,9 +184,11 @@ static void cras_free_jack(struct cras_alsa_jack *jack,
 
 	free(jack->ucm_device);
 	free((void *)jack->edid_file);
-	if (jack->display_info_timer)
-		cras_tm_cancel_timer(cras_system_state_get_tm(),
-				     jack->display_info_timer);
+	if (jack->display_info_timer) {
+		cras_tm_clear_timer(cras_system_state_get_tm(),
+				    jack->display_info_timer);
+		cras_tm_free_timer(jack->display_info_timer);
+	}
 
 	if (jack->is_gpio) {
 		free(jack->gpio.device_name);
@@ -291,10 +293,7 @@ static inline void jack_state_change_cb(struct cras_alsa_jack *jack, int retry)
 {
 	struct cras_tm *tm = cras_system_state_get_tm();
 
-	if (jack->display_info_timer) {
-		cras_tm_cancel_timer(tm, jack->display_info_timer);
-		jack->display_info_timer = NULL;
-	}
+	cras_tm_clear_timer(tm, jack->display_info_timer);
 	if (retry)
 		jack->display_info_retries = DISPLAY_INFO_MAX_RETRIES;
 
@@ -321,9 +320,11 @@ static inline void jack_state_change_cb(struct cras_alsa_jack *jack, int retry)
 		goto report_jack_state;
 	}
 
-	jack->display_info_timer = cras_tm_create_timer(tm,
-						DISPLAY_INFO_RETRY_DELAY_MS,
-						display_info_delay_cb, jack);
+	cras_tm_set_timer(tm,
+			  &jack->display_info_timer,
+			  DISPLAY_INFO_RETRY_DELAY_MS,
+			  display_info_delay_cb,
+			  jack);
 	return;
 
 report_jack_state:
@@ -358,7 +359,6 @@ static void display_info_delay_cb(struct cras_timer *timer, void *arg)
 {
 	struct cras_alsa_jack *jack = (struct cras_alsa_jack *)arg;
 
-	jack->display_info_timer = NULL;
 	jack_state_change_cb(jack, 0);
 }
 

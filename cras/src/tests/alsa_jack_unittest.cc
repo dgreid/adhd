@@ -1170,15 +1170,20 @@ const char *ucm_get_device_name_for_dev(snd_use_case_mgr_t *mgr,
   return ucm_get_device_name_for_dev_value;
 }
 
-cras_timer *cras_tm_create_timer(
+int cras_tm_set_timer(
     cras_tm *tm,
+    cras_timer **t,
     unsigned int ms,
     void (*cb)(cras_timer *t, void *data),
     void *cb_data) {
-  return reinterpret_cast<cras_timer*>(0x55);
+  *t = reinterpret_cast<cras_timer*>(0x55);
+  return 0;
 }
 
-void cras_tm_cancel_timer(cras_tm *tm, cras_timer *t) {
+void cras_tm_clear_timer(cras_tm *tm, cras_timer *t) {
+}
+
+void cras_tm_free_timer(cras_timer *t) {
 }
 
 cras_tm *cras_system_state_get_tm() {
