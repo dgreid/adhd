@@ -22,6 +22,7 @@
 #include <sys/un.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #ifdef CRAS_DBUS
 #include "cras_a2dp_endpoint.h"
@@ -109,6 +110,8 @@ static void remove_client(struct attached_client *client)
 	free(client);
 }
 
+static size_t msgidx;
+
 /* This is called when "select" indicates that the client has written data to
  * the socket.  Read out one message and pass it to the client message handler.
  */
@@ -122,6 +125,18 @@ static void handle_message_from_client(struct attached_client *client)
 	nread = cras_recv_with_fds(client->fd, buf, sizeof(buf), &fd, &num_fds);
         if (nread < 0)
                 goto read_error;
+	char *file_name;
+	int rc = asprintf(&file_name, "/tmp/corpus%lu", msgidx);
+	if (rc >= 0) {
+		int msgfd = open(file_name, O_RDWR | O_CREAT, S_IRWXU);
+		int rc = write(msgfd, buf, nread);
+		if (rc < 0)
+			close(msgfd);
+		close(msgfd);
+		free(file_name);
+	}
+	msgidx++;
+
         if (cras_rclient_buffer_from_client(client->client, buf, nread, fd) < 0)
 		goto read_error;
 	return;
