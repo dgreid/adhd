@@ -30,8 +30,8 @@ CRAS_FMA =
 endif
 
 CRAS_UT_TMPDIR_CFLAGS=-DCRAS_UT_TMPDIR=\"/tmp\"
-COMMON_CPPFLAGS = -O2 -Wall -Werror -Wno-error=cpp
-COMMON_SIMD_CPPFLAGS = -O3 -Wall -Werror -Wno-error=cpp
+COMMON_CPPFLAGS = -O2 -Wall -Werror
+COMMON_SIMD_CPPFLAGS = -O3 -Wall -Werror
 
 bin_PROGRAMS = cras cras_test_client cras_monitor cras_router
 
@@ -340,7 +340,10 @@ TESTS = \
 	util_unittest \
 	volume_curve_unittest
 
-check_PROGRAMS = $(TESTS)
+FUZZ_TESTS = \
+	fuzz_rclient_message
+
+check_PROGRAMS = $(TESTS) $(FUZZ_TESTS)
 
 cras_test_client_SOURCES = tests/cras_test_client.c
 cras_test_client_LDADD = -lm libcras.la
@@ -648,6 +651,15 @@ file_wait_unittest_SOURCES = tests/file_wait_unittest.cc \
 file_wait_unittest_CPPFLAGS = $(COMMON_CPPFLAGS) -I$(top_srcdir)/src/common \
 	$(CRAS_UT_TMPDIR_CFLAGS)
 file_wait_unittest_LDADD = -lgtest -lpthread
+
+fuzz_rclient_message_SOURCES = fuzz/rclient_message.cc
+fuzz_rclient_message_CPPFLAGS = $(COMMON_CPPFLAGS) -I$(top_srcdir)/src/common \
+	-I$(top_srcdir)/src/server
+fuzz_rclient_message_LDADD = \
+	libcrasserver.la \
+	-lpthread -lrt -ludev -ldl -lm \
+	-lFuzzer \
+	-liniparser -lasound -lspeexdsp
 
 fmt_conv_unittest_SOURCES = tests/fmt_conv_unittest.cc server/cras_fmt_conv.c
 fmt_conv_unittest_CPPFLAGS = $(COMMON_CPPFLAGS) -I$(top_srcdir)/src/common \

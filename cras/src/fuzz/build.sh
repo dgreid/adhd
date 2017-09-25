@@ -12,7 +12,6 @@ cd $SRC/cras
 ./configure --disable-DBUS
 make -j$(nproc)
 
-ls /work
 $CXX $CXXFLAGS $FUZZER_LDFLAGS \
   $SRC/cras/src/fuzz/rclient_message.cc -o $OUT/rclient_message \
   -I $SRC/cras/src/server \

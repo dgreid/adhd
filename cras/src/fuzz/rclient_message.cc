@@ -22,7 +22,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   cras_iodev_list_init();
 
   cras_rclient *client = cras_rclient_create(0, 0);
-  int rc = cras_rclient_buffer_from_client(client, data, size, -1);
+  cras_rclient_buffer_from_client(client, data, size, -1);
   cras_rclient_destroy(client);
 
   cras_iodev_list_deinit();
