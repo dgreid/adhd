@@ -172,7 +172,8 @@ noinst_LTLIBRARIES = \
 	$(CRAS_AVX2) \
 	$(CRAS_FMA) \
 	libcrasmix.la \
-	libcrasserver.la
+	libcrasserver.la \
+	libfuzz_rclient_message.la
 
 libcrasmix_la_SOURCES = \
 	server/cras_mix_ops.c
@@ -812,3 +813,14 @@ volume_curve_unittest_SOURCES = tests/volume_curve_unittest.cc \
 volume_curve_unittest_CPPFLAGS = $(COMMON_CPPFLAGS) \
 	-I$(top_srcdir)/src/common -I$(top_srcdir)/src/server
 volume_curve_unittest_LDADD = -lgtest -lpthread
+
+# Fuzzing archives, will be linked with the fuzzing library on OSSFuzz runner.
+libfuzz_rclient_message_la_SOURCES = \
+	fuzz/rclient_message.cc
+libfuzz_rclient_message_la_CPPFLAGS = $(COMMON_CPPFLAGS) \
+	-I$(top_srcdir)/src/common \
+	-I$(top_srcdir)/src/dsp -I$(top_srcdir)/src/server \
+	-I$(top_srcdir)/src/server/config \
+	$(DBUS_CFLAGS) $(SBC_CFLAGS)
+libfuzz_rclient_message_la_LIBADD = \
+	libcrasserver.la
