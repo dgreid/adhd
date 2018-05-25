@@ -1,0 +1,9 @@
+[package]
+name = "messages"
+version = "0.1.0"
+authors = ["The Chromium OS authors"]
+
+[lib]
+path = "src/messages.rs"
+
+[dependencies]
