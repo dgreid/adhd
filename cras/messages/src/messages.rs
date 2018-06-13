@@ -25,7 +25,7 @@ enum CRAS_SERVER_MESSAGE_ID {
 	CRAS_SERVER_GET_HOTWORD_MODELS,
 	CRAS_SERVER_SET_HOTWORD_MODEL,
 	CRAS_SERVER_REGISTER_NOTIFICATION,
-};
+}
 
 /// Message IDs sent from the server to a client.
 enum CRAS_CLIENT_MESSAGE_ID {
@@ -44,7 +44,23 @@ enum CRAS_CLIENT_MESSAGE_ID {
 	CRAS_CLIENT_NODE_LEFT_RIGHT_SWAPPED_CHANGED,
 	CRAS_CLIENT_INPUT_NODE_GAIN_CHANGED,
 	CRAS_CLIENT_NUM_ACTIVE_STREAMS_CHANGED,
-};
+}
+
+/// Messages that control the server. These are sent from the client to affect
+/// an action on the server.
+#[repr(packed)]
+struct cras_server_message {
+    length: u32,
+	id: CRAS_SERVER_MESSAGE_ID,
+}
+
+/// Messages that control the client. These are sent from the server to affect
+/// and action on the client.
+#[repr(packed)]
+struct cras_client_message {
+    length: u32,
+	id: CRAS_CLIENT_MESSAGE_ID,
+}
 
 #[cfg(test)]
 mod tests {

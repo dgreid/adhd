@@ -5,3 +5,4 @@
 
 #include "../src/common/cras_iodev_info.h"
 #include "../src/common/cras_types.h"
+#include "../src/common/cras_messages.h"
