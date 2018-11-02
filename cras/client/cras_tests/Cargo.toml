@@ -1,0 +1,8 @@
+[package]
+name = "cras_tests"
+version = "0.1.0"
+authors = ["Paul Hsia <paulhsia@chromium.org>"]
+
+[dependencies]
+libcras = { path = "../libcras" }
+cras_common = { path = "../cras_common" }

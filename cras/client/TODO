@@ -1,0 +1,5 @@
+1. copy sys_utils, syscall_defines, data_model to this dir for compiling
+    => change this by include from dev-rust (?)
+2. Refactoring libcras/src/socket.rs
+3. Refactoring libcras/src/lib.rs
+4. Add tests
