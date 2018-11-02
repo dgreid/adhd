@@ -1,0 +1,11 @@
+[[package]]
+name = "cras_common"
+version = "0.1.0"
+dependencies = [
+ "data_model 0.1.0",
+]
+
+[[package]]
+name = "data_model"
+version = "0.1.0"
+
