@@ -4,4 +4,7 @@
 #![allow(non_upper_case_globals)]
 extern crate libc;
 extern crate cras_common;
+extern crate sys_util;
+
 mod cras_shm;
+mod socket;
