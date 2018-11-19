@@ -6,4 +6,5 @@ authors = ["The Chromium OS Authors"]
 [dependencies]
 libc = "=0.2.40"
 sys_util = { path = "../sys_util" }
+data_model = { path = "../data_model" }
 cras_common = { path = "../cras_common" }
