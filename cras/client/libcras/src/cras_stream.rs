@@ -197,18 +197,12 @@ impl<'a> CrasStream<'a> {
     }
 
     /// Receive shared memory fd and initialize stream audio shared memory area
-    pub fn init_shm(&mut self) -> Result<(), Error> {
-        match self.stream_channel.recv() {
-            Ok(CrasStreamRc::ClientStreamShm(shm_fd)) => {
-                let shm = CrasSharedMemory::new(shm_fd)?;
-                let (buffer, header) = create_header_and_buffers(shm);
-                self.controls.header = Some(header);
-                self.audio_buffer = Some(buffer);
-                Ok(())
-            }
-            Ok(_) => Err(Error::new(ErrorType::MessageTypeError)),
-            Err(err) => Err(Error::new(ErrorType::RecvError(err))),
-        }
+    pub fn init_shm(&mut self, shm_fd: CrasShmFd) -> Result<(), Error> {
+        let shm = CrasSharedMemory::new(shm_fd)?;
+        let (buffer, header) = create_header_and_buffers(shm);
+        self.controls.header = Some(header);
+        self.audio_buffer = Some(buffer);
+        Ok(())
     }
 
     fn wait_request_data(&self) -> Result<(), Error> {

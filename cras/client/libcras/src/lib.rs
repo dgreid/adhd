@@ -358,7 +358,18 @@ impl CrasClient {
             audio_fd,
             receiver,
         );
-        stream.init_shm().unwrap();
+
+        loop {
+            match self.inner.wait_and_handle_server_message() {
+                Ok(HandleResult::ClientStreamShm(stream_id, shm_fd)) => {
+                    stream.init_shm(shm_fd).unwrap();
+                    break;
+                }
+                Ok(_) => (),
+                Err(_) => break, // TODO - should return an error instead.
+            };
+        }
+
         stream
     }
 
@@ -379,21 +390,6 @@ impl CrasClient {
         };
 
         let inner = cras_client.inner.clone();
-        thread::spawn(move || loop {
-            match inner.wait_and_handle_server_message() {
-                Ok(HandleResult::ClientStreamShm(stream_id, shm_fd)) => {
-                    let mut guard = inner.stream_channels.write().unwrap();
-                    guard[&stream_id]
-                        .lock()
-                        .unwrap()
-                        .send(CrasStreamRc::ClientStreamShm(shm_fd))
-                        .unwrap();
-                }
-                _ => {
-                    println!("error");
-                }
-            };
-        });
 
         println!("CrasClient id: {}", &cras_client.client_id);
         Ok(cras_client)
