@@ -239,10 +239,8 @@ impl CrasClientInner {
 
 pub struct CrasClient {
     inner: Arc<CrasClientInner>,
-    command_channel: Arc<std::sync::mpsc::Sender<CrasClientCmd>>,
     client_id: i32,
     next_stream_id: u32,
-    cmd_worker: CmdWoker,
 }
 
 // Utils
@@ -267,58 +265,6 @@ pub fn cras_audio_format_packed_new(
     res
 }
 
-#[derive(Debug)]
-pub enum CrasClientCmd {
-    RemoveStream(u32),
-}
-
-fn handle_command(inner: Arc<CrasClientInner>, cmd: CrasClientCmd) {
-    match cmd {
-        CrasClientCmd::RemoveStream(stream_id) => {
-            // Send stream disconnect message
-            let msg_header = cras_server_message {
-                length: mem::size_of::<cras_disconnect_stream_message>() as u32,
-                id: CRAS_SERVER_MESSAGE_ID::CRAS_SERVER_DISCONNECT_STREAM,
-            };
-            let server_cmsg = cras_disconnect_stream_message {
-                header: msg_header,
-                stream_id,
-            };
-            let res = inner
-                .server_socket
-                .send_server_message_with_fds(&server_cmsg, &[]);
-
-            // Remove channel to the stream
-            let sender = inner.stream_channels.write().unwrap().remove(&stream_id);
-            sender
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .send(CrasStreamRc::RemoveSuccess);
-        }
-    }
-}
-
-struct CmdWoker {
-    thread: thread::JoinHandle<Result<(), Error>>,
-}
-
-impl CmdWoker {
-    pub fn new(
-        inner: Arc<CrasClientInner>,
-        cmd_channel: Receiver<CrasClientCmd>,
-    ) -> Result<CmdWoker, io::Error> {
-        let thread = thread::Builder::new()
-            .name("CmdWoker".to_string())
-            .spawn(move || loop {
-                let cmd_msg = cmd_channel.recv()?;
-                handle_command(inner.clone(), cmd_msg);
-            })?;
-        Ok(CmdWoker { thread })
-    }
-}
-
 impl CrasClient {
     pub fn new() -> Result<CrasClient, Error> {
         let server_socket = CrasServerSocket::new()?;
@@ -327,16 +273,10 @@ impl CrasClient {
             stream_channels: RwLock::new(HashMap::new()),
         });
 
-        // Create command channel
-        let (sender, receiver) = channel::<CrasClientCmd>();
-        let cmd_worker = CmdWoker::new(inner.clone(), receiver)?;
-
         Ok(CrasClient {
             inner,
-            command_channel: Arc::new(sender),
             client_id: -1,
             next_stream_id: 0,
-            cmd_worker,
         })
     }
 
@@ -409,6 +349,7 @@ impl CrasClient {
 
         let mut stream = CrasStream::new(
             stream_id,
+            self.inner.server_socket.try_clone().unwrap(),
             block_size,
             direction,
             rate,
@@ -416,7 +357,6 @@ impl CrasClient {
             format,
             audio_fd,
             receiver,
-            self.command_channel.clone(),
         );
         stream.init_shm().unwrap();
         stream

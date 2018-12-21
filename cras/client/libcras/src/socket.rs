@@ -81,6 +81,17 @@ impl UnixSeqpacket {
         }
     }
 
+    /// Clone the underlying FD.
+    pub fn try_clone(&self) -> io::Result<UnixSeqpacket> {
+        // Calling `dup` is safe as the kernel doesn't touch any user memory it the process.
+        let new_fd = unsafe { libc::dup(self.fd) };
+        if new_fd < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(UnixSeqpacket { fd: new_fd })
+        }
+    }
+
     // Write data from a given buffer to the socket fd
     fn write(&self, buf: &[u8]) -> io::Result<usize> {
         unsafe {
@@ -150,6 +161,13 @@ impl CrasServerSocket {
                 Err(err) => Err(io::Error::new(io::ErrorKind::Other, format!("{}", err))),
             },
         }
+    }
+
+    /// Create a clone of the underlying socket. The returned clone can also be used to communicate
+    /// with the cras server.
+    pub fn try_clone(&self) -> io::Result<CrasServerSocket> {
+        let new_sock = self.socket.try_clone()?;
+        Ok(CrasServerSocket { socket: new_sock })
     }
 }
 

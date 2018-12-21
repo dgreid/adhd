@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 use std::io;
 use std::io::Write;
-use std::sync::mpsc::{Receiver, RecvError, Sender};
-use std::sync::Arc;
+use std::mem;
+use std::sync::mpsc::{Receiver, RecvError};
 use std::{error, fmt};
 
 use cras_common::gen::*;
 use cras_shm::*;
+use socket::CrasServerSocket;
 use AudioFd;
-use CrasClientCmd;
 
 #[derive(Debug)]
 pub enum ErrorType {
@@ -150,6 +150,7 @@ impl CrasPlaybackDrop for CrasStreamControls {
 #[allow(dead_code)]
 pub struct CrasStream<'a> {
     stream_id: u32,
+    server_socket: CrasServerSocket,
     block_size: u32,
     direction: u32,
     rate: usize,
@@ -160,8 +161,6 @@ pub struct CrasStream<'a> {
     audio_buffer: Option<CrasAudioBuffer<'a>>,
     /// A receiver for message from `CrasClient`
     stream_channel: Receiver<CrasStreamRc>,
-    /// A sender for sending command to `CtrasClient`
-    command_channel: Arc<Sender<CrasClientCmd>>,
 }
 
 impl<'a> CrasStream<'a> {
@@ -171,6 +170,7 @@ impl<'a> CrasStream<'a> {
     /// `CrasStream` - CRAS client stream.
     pub fn new(
         stream_id: u32,
+        server_socket: CrasServerSocket,
         block_size: u32,
         direction: u32,
         rate: usize,
@@ -178,10 +178,10 @@ impl<'a> CrasStream<'a> {
         format: snd_pcm_format_t,
         aud_fd: AudioFd,
         stream_channel: Receiver<CrasStreamRc>,
-        command_channel: Arc<Sender<CrasClientCmd>>,
     ) -> CrasStream<'a> {
         CrasStream {
             stream_id,
+            server_socket,
             block_size,
             direction,
             rate,
@@ -193,7 +193,6 @@ impl<'a> CrasStream<'a> {
             },
             audio_buffer: None,
             stream_channel,
-            command_channel,
         }
     }
 
@@ -257,25 +256,18 @@ impl<'a> Drop for CrasStream<'a> {
     /// return message.
     /// Write error message to stderr if the method fail.
     fn drop(&mut self) {
-        let rc = self
-            .command_channel
-            .send(CrasClientCmd::RemoveStream(self.stream_id));
-        if let Err(err) = rc {
-            let stderr = io::stderr();
-            write!(stderr.lock(), "CrasStream::drop: {}", err);
-        } else {
-            match self.stream_channel.recv() {
-                Ok(CrasStreamRc::RemoveSuccess) => {}
-                Ok(_) => {
-                    let stderr = io::stderr();
-                    write!(stderr.lock(), "CrasStream::drop: {}", "Message type error");
-                }
-                Err(err) => {
-                    let stderr = io::stderr();
-                    write!(stderr.lock(), "CrasStream::drop: {}", err);
-                }
-            }
-        }
+        // Send stream disconnect message
+        let msg_header = cras_server_message {
+            length: mem::size_of::<cras_disconnect_stream_message>() as u32,
+            id: CRAS_SERVER_MESSAGE_ID::CRAS_SERVER_DISCONNECT_STREAM,
+        };
+        let server_cmsg = cras_disconnect_stream_message {
+            header: msg_header,
+            stream_id: self.stream_id,
+        };
+        let _res = self // TODO - log errors if needed.
+            .server_socket
+            .send_server_message_with_fds(&server_cmsg, &[]);
     }
 }
 
