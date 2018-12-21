@@ -79,17 +79,16 @@ impl AudioFd {
         enum Token {
             AudioMsg,
         }
-        let poll_ctx: PollContext<Token> = match PollContext::new()
-            .and_then(|pc| pc.add(self, Token::AudioMsg).and(Ok(pc)))
-        {
-            Ok(pc) => pc,
-            Err(e) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed to create PollContext: {}", e),
-                ));
-            }
-        };
+        let poll_ctx: PollContext<Token> =
+            match PollContext::new().and_then(|pc| pc.add(self, Token::AudioMsg).and(Ok(pc))) {
+                Ok(pc) => pc,
+                Err(e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to create PollContext: {}", e),
+                    ));
+                }
+            };
         let events = {
             match poll_ctx.wait() {
                 Ok(v) => v,
@@ -103,8 +102,7 @@ impl AudioFd {
         };
 
         // Check the first readable message
-        let tokens: Vec<Token> =
-            events.iter_readable().map(|e| e.token()).collect();
+        let tokens: Vec<Token> = events.iter_readable().map(|e| e.token()).collect();
         if tokens.len() == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::Other,

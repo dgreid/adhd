@@ -16,9 +16,7 @@ extern crate sys_util;
 use sys_util::ScmSocket;
 
 // Return `sockaddr_un` for a given `path`
-fn sockaddr_un<P: AsRef<Path>>(
-    path: P,
-) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
+fn sockaddr_un<P: AsRef<Path>>(path: P) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
     let mut addr = libc::sockaddr_un {
         sun_family: libc::AF_UNIX as libc::sa_family_t,
         sun_path: [0; 108],
@@ -149,10 +147,7 @@ impl CrasServerSocket {
             0 => self.socket.write(msg_bytes),
             _ => match self.send_with_fds(msg_bytes, fds) {
                 Ok(len) => Ok(len),
-                Err(err) => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("{}", err),
-                )),
+                Err(err) => Err(io::Error::new(io::ErrorKind::Other, format!("{}", err))),
             },
         }
     }
@@ -211,9 +206,7 @@ mod tests {
             ref_sun_path[i] = 'a' as i8;
         }
 
-        for (addr_char, ref_char) in
-            addr.sun_path.iter().zip(ref_sun_path.iter())
-        {
+        for (addr_char, ref_char) in addr.sun_path.iter().zip(ref_sun_path.iter()) {
             assert_eq!(addr_char, ref_char);
         }
     }
@@ -230,8 +223,7 @@ mod tests {
 
     fn mock_server_socket(socket_path: &Path) {
         unsafe {
-            let socket_fd =
-                libc::socket(libc::PF_UNIX, libc::SOCK_SEQPACKET, 0);
+            let socket_fd = libc::socket(libc::PF_UNIX, libc::SOCK_SEQPACKET, 0);
             assert!(socket_fd > 0);
             // Bind socket to path
             let (addr, len) = sockaddr_un(socket_path).unwrap();

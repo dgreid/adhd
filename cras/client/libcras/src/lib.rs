@@ -143,9 +143,7 @@ impl CrasClientMessage {
         }
     }
 
-    pub fn try_new(
-        server_socket: &CrasServerSocket,
-    ) -> Result<CrasClientMessage, String> {
+    pub fn try_new(server_socket: &CrasServerSocket) -> Result<CrasClientMessage, String> {
         let mut message = CrasClientMessage::new();
         let (len, fd_nums) = server_socket
             .recv_with_fds(&mut message._data, &mut message.fds)
@@ -181,8 +179,7 @@ impl CrasClientMessage {
     }
 
     pub fn get_id(&self) -> u32 {
-        let msg: &cras_client_message =
-            unsafe { mem::transmute(self._data.as_ptr()) };
+        let msg: &cras_client_message = unsafe { mem::transmute(self._data.as_ptr()) };
         msg.id
     }
 
@@ -192,9 +189,7 @@ impl CrasClientMessage {
     }
 }
 
-fn handle_connect_message<'a>(
-    inner: &CrasClientInner,
-) -> Result<HandleResult, Error> {
+fn handle_connect_message<'a>(inner: &CrasClientInner) -> Result<HandleResult, Error> {
     let message = CrasClientMessage::try_new(&inner.server_socket)?;
     match message.get_id() {
         CRAS_CLIENT_MESSAGE_ID::CRAS_CLIENT_CONNECTED => {
@@ -227,9 +222,8 @@ impl CrasClientInner {
         enum Token {
             ServerMsg,
         }
-        let poll_ctx: PollContext<Token> = PollContext::new().and_then(|pc| {
-            pc.add(&self.server_socket, Token::ServerMsg).and(Ok(pc))
-        })?;
+        let poll_ctx: PollContext<Token> = PollContext::new()
+            .and_then(|pc| pc.add(&self.server_socket, Token::ServerMsg).and(Ok(pc)))?;
         let events = poll_ctx.wait()?;
         for event in events.iter_readable() {
             match event.token() {
@@ -295,8 +289,7 @@ fn handle_command(inner: Arc<CrasClientInner>, cmd: CrasClientCmd) {
                 .send_server_message_with_fds(&server_cmsg, &[]);
 
             // Remove channel to the stream
-            let sender =
-                inner.stream_channels.write().unwrap().remove(&stream_id);
+            let sender = inner.stream_channels.write().unwrap().remove(&stream_id);
             sender
                 .as_ref()
                 .unwrap()
@@ -367,8 +360,7 @@ impl CrasClient {
     ) -> CrasStream {
         let stream_id = self.get_stream_id();
 
-        let audio_format =
-            cras_audio_format_packed_new(format, rate, channel_num);
+        let audio_format = cras_audio_format_packed_new(format, rate, channel_num);
         let msg_header = cras_server_message {
             length: mem::size_of::<cras_connect_message>() as u32,
             id: CRAS_SERVER_MESSAGE_ID::CRAS_SERVER_CONNECT_STREAM,

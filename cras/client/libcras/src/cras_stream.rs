@@ -48,9 +48,7 @@ impl fmt::Display for Error {
             ErrorType::IoError(ref err) => err.fmt(f),
             ErrorType::RecvError(ref err) => err.fmt(f),
             ErrorType::MessageTypeError => write!(f, "Message type error"),
-            ErrorType::NoShmError => {
-                write!(f, "CrasAudioShmArea is not created")
-            }
+            ErrorType::NoShmError => write!(f, "CrasAudioShmArea is not created"),
         }
     }
 }
@@ -140,7 +138,11 @@ struct CrasStreamControls {
 impl CrasPlaybackDrop for CrasStreamControls {
     fn trigger(&mut self, nframes: usize) {
         // [TODO] error handling
-        self.header.as_mut().unwrap().get().commit_written_frames(nframes as u32);
+        self.header
+            .as_mut()
+            .unwrap()
+            .get()
+            .commit_written_frames(nframes as u32);
         self.audio_fd.data_ready(nframes as u32);
     }
 }
@@ -223,15 +225,29 @@ impl<'a> CrasStream<'a> {
     /// # Returns
     ///
     /// * `CrasPlaybackBuffer` - A buffer for user to write audio data
-    pub fn next_playback_buffer(
-        &mut self,
-    ) -> Result<CrasPlaybackBuffer, Error> {
+    pub fn next_playback_buffer(&mut self) -> Result<CrasPlaybackBuffer, Error> {
         // Wait for request audio message
         self.wait_request_data()?;
         // [TODO] error handling
-        let frame_size = self.controls.header.as_mut().unwrap().get().get_frame_size();
-        let (offset, len) = self.controls.header.as_mut().unwrap().get().get_offset_and_len();
-        let buf = self.audio_buffer.as_mut().unwrap().get(offset as isize, len);
+        let frame_size = self
+            .controls
+            .header
+            .as_mut()
+            .unwrap()
+            .get()
+            .get_frame_size();
+        let (offset, len) = self
+            .controls
+            .header
+            .as_mut()
+            .unwrap()
+            .get()
+            .get_offset_and_len();
+        let buf = self
+            .audio_buffer
+            .as_mut()
+            .unwrap()
+            .get(offset as isize, len);
         Ok(CrasPlaybackBuffer::new(frame_size, buf, &mut self.controls))
     }
 }
@@ -252,11 +268,7 @@ impl<'a> Drop for CrasStream<'a> {
                 Ok(CrasStreamRc::RemoveSuccess) => {}
                 Ok(_) => {
                     let stderr = io::stderr();
-                    write!(
-                        stderr.lock(),
-                        "CrasStream::drop: {}",
-                        "Message type error"
-                    );
+                    write!(stderr.lock(), "CrasStream::drop: {}", "Message type error");
                 }
                 Err(err) => {
                     let stderr = io::stderr();

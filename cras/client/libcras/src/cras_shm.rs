@@ -62,9 +62,7 @@ impl<'a> CrasAudioShmAreaHeader<'a> {
     pub fn get_offset_and_len(&self) -> (usize, usize) {
         let used_size = self.get_used_size();
         let offset = unsafe {
-            if (read_volatile(&self.header.write_buf_idx as *const u32) & 1u32)
-                == 1
-            {
+            if (read_volatile(&self.header.write_buf_idx as *const u32) & 1u32) == 1 {
                 used_size
             } else {
                 0usize
@@ -79,17 +77,12 @@ impl<'a> CrasAudioShmAreaHeader<'a> {
     ///
     /// * `usize` - Number of bytes per frame
     pub fn get_frame_size(&self) -> usize {
-        unsafe {
-            read_volatile(&self.header.config.frame_bytes as *const u32)
-                as usize
-        }
+        unsafe { read_volatile(&self.header.config.frame_bytes as *const u32) as usize }
     }
 
     /// Gets the size in bytes of the shared memory buffer.
     fn get_used_size(&self) -> usize {
-        unsafe {
-            read_volatile(&self.header.config.used_size as *const u32) as usize
-        }
+        unsafe { read_volatile(&self.header.config.used_size as *const u32) as usize }
     }
 
     /// Gets index of the current written buffer.
@@ -98,8 +91,7 @@ impl<'a> CrasAudioShmAreaHeader<'a> {
     /// `u32` - the returned index is less then `CRAS_NUM_SHM_BUFFERS`.
     fn get_write_buf_idx(&self) -> u32 {
         unsafe {
-            read_volatile(&self.header.write_buf_idx as *const u32)
-                & CRAS_NUM_SHM_BUFFERS_MASK
+            read_volatile(&self.header.write_buf_idx as *const u32) & CRAS_NUM_SHM_BUFFERS_MASK
         }
     }
 
@@ -141,10 +133,7 @@ impl<'a> CrasAudioShmAreaHeader<'a> {
         }
 
         unsafe {
-            write_volatile(
-                &mut self.header.write_offset[idx] as *mut u32,
-                offset,
-            );
+            write_volatile(&mut self.header.write_offset[idx] as *mut u32, offset);
         }
         Ok(())
     }
@@ -175,10 +164,7 @@ impl<'a> CrasAudioShmAreaHeader<'a> {
         }
 
         unsafe {
-            write_volatile(
-                &mut self.header.read_offset[idx] as *mut u32,
-                offset,
-            );
+            write_volatile(&mut self.header.read_offset[idx] as *mut u32, offset);
         }
         Ok(())
     }
@@ -199,10 +185,7 @@ impl<'a> CrasAudioShmAreaHeader<'a> {
     /// This function is safe because we switch `write_buf_idx` after letting
     /// `write_offset` and `read_offset` ready and we read / write shared memory
     /// variables with volatile operations.
-    pub fn commit_written_frames(
-        &mut self,
-        frame_count: u32,
-    ) -> io::Result<()> {
+    pub fn commit_written_frames(&mut self, frame_count: u32) -> io::Result<()> {
         // Uses `u64` to prevent possible overflow
         let byte_count = frame_count as u64 * self.get_frame_size() as u64;
         if byte_count > self.get_used_size() as u64 {
@@ -238,21 +221,14 @@ impl cras_audio_shm_area {
         // 1000 is larger then the header part of `cras_audio_shm_area`
         let buf = [0u8; 1000];
         // Create a `cras_audio_shm_area` reference with zero sized `samples`
-        let area: &cras_audio_shm_area =
-            unsafe { mem::transmute((&buf, 1usize)) };
+        let area: &cras_audio_shm_area = unsafe { mem::transmute((&buf, 1usize)) };
         area.samples.as_ptr() as usize - buf.as_ptr() as usize
     }
 }
 
 // A safe mmap function with error handling
-fn cras_mmap(
-    len: usize,
-    prot: libc::c_int,
-    fd: libc::c_int,
-) -> io::Result<*mut libc::c_void> {
-    match unsafe {
-        libc::mmap(ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0)
-    } {
+fn cras_mmap(len: usize, prot: libc::c_int, fd: libc::c_int) -> io::Result<*mut libc::c_void> {
+    match unsafe { libc::mmap(ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0) } {
         libc::MAP_FAILED => Err(io::Error::last_os_error()),
         shm_ptr => Ok(shm_ptr),
     }
@@ -346,34 +322,36 @@ pub struct CrasAudioHeader {
 impl CrasAudioHeader {
     pub fn get(&mut self) -> CrasAudioShmAreaHeader {
         CrasAudioShmAreaHeader {
-            header: unsafe{ self.addr.as_mut().unwrap() },
+            header: unsafe { self.addr.as_mut().unwrap() },
             samples_len: self.samples_len,
         }
     }
 }
 
 /// Create header and buffer from given shared memory.
-pub fn create_header_and_buffers<'a>(cras_shm: CrasSharedMemory)
-    -> (CrasAudioBuffer<'a>, CrasAudioHeader) {
+pub fn create_header_and_buffers<'a>(
+    cras_shm: CrasSharedMemory,
+) -> (CrasAudioBuffer<'a>, CrasAudioHeader) {
     let cras_shm = Arc::new(cras_shm);
     let samples_offset = cras_audio_shm_area::offset_of_samples();
     // [TODO] check if this failed
     let samples_len = cras_shm.shm_size - samples_offset;
     let mut header = CrasAudioHeader {
-            addr: cras_shm.shm_ptr as *mut _,
-            cras_shm: cras_shm.clone(),
-            samples_len,
+        addr: cras_shm.shm_ptr as *mut _,
+        cras_shm: cras_shm.clone(),
+        samples_len,
     };
 
-    let buffer_ptr = unsafe {
-        cras_shm.shm_ptr.offset(samples_offset as isize)
-    };
-    (CrasAudioBuffer {
-        addr: buffer_ptr as *mut _,
-        size: samples_len,
-        cras_shm: cras_shm.clone(),
-        phantom: PhantomData,
-    }, header)
+    let buffer_ptr = unsafe { cras_shm.shm_ptr.offset(samples_offset as isize) };
+    (
+        CrasAudioBuffer {
+            addr: buffer_ptr as *mut _,
+            size: samples_len,
+            cras_shm: cras_shm.clone(),
+            phantom: PhantomData,
+        },
+        header,
+    )
 }
 
 pub struct CrasSharedMemory {
@@ -388,7 +366,11 @@ pub struct CrasSharedMemory {
 impl CrasSharedMemory {
     pub fn new(fd: CrasShmFd) -> io::Result<CrasSharedMemory> {
         let shm_ptr = cras_mmap(fd.shm_max_size, libc::PROT_READ | libc::PROT_WRITE, fd.fd)?;
-        Ok(CrasSharedMemory{shm_fd: fd.fd, shm_ptr, shm_size: fd.shm_max_size})
+        Ok(CrasSharedMemory {
+            shm_fd: fd.fd,
+            shm_ptr,
+            shm_size: fd.shm_max_size,
+        })
     }
 }
 
@@ -433,8 +415,7 @@ mod tests {
     use super::*;
     #[test]
     fn cras_audio_shm_area_header_switch_test() {
-        let mut raw_header: cras_audio_shm_area_header =
-            unsafe { mem::zeroed() };
+        let mut raw_header: cras_audio_shm_area_header = unsafe { mem::zeroed() };
         let mut header = CrasAudioShmAreaHeader {
             header: &mut raw_header,
             samples_len: 0,
@@ -447,8 +428,7 @@ mod tests {
 
     #[test]
     fn cras_audio_shm_area_header_write_offset_test() {
-        let mut raw_header: cras_audio_shm_area_header =
-            unsafe { mem::zeroed() };
+        let mut raw_header: cras_audio_shm_area_header = unsafe { mem::zeroed() };
         let mut header = CrasAudioShmAreaHeader {
             header: &mut raw_header,
             samples_len: 20,
@@ -468,8 +448,7 @@ mod tests {
 
     #[test]
     fn cras_audio_shm_area_header_read_offset_test() {
-        let mut raw_header: cras_audio_shm_area_header =
-            unsafe { mem::zeroed() };
+        let mut raw_header: cras_audio_shm_area_header = unsafe { mem::zeroed() };
         let mut header = CrasAudioShmAreaHeader {
             header: &mut raw_header,
             samples_len: 20,
@@ -489,8 +468,7 @@ mod tests {
 
     #[test]
     fn cras_audio_shm_area_header_commit_written_frame_test() {
-        let mut raw_header: cras_audio_shm_area_header =
-            unsafe { mem::zeroed() };
+        let mut raw_header: cras_audio_shm_area_header = unsafe { mem::zeroed() };
         let mut header = CrasAudioShmAreaHeader {
             header: &mut raw_header,
             samples_len: 20,
