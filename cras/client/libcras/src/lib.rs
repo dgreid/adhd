@@ -7,18 +7,8 @@ use std::io;
 use std::mem;
 use std::{error, fmt};
 
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::RecvError;
-use std::sync::mpsc::Sender;
-
-use std::sync::Arc;
-use std::thread;
 extern crate libc;
-use std::collections::HashMap;
 use std::os::unix::io::RawFd;
-use std::sync::Mutex;
-use std::sync::RwLock;
 
 extern crate cras_common;
 use cras_common::gen::*;
@@ -29,7 +19,6 @@ pub type CrasShmServerState<'a> = CrasShm<'a, cras_server_state>;
 
 mod cras_stream;
 use cras_stream::CrasStream;
-use cras_stream::CrasStreamRc;
 
 extern crate sys_util;
 use sys_util::*;
@@ -44,7 +33,6 @@ use audio_fd::AudioFd;
 #[derive(Debug)]
 pub enum ErrorType {
     IoError(io::Error),
-    RecvError(RecvError),
     SysUtilError(sys_util::Error),
     MessageTypeError,
     UnexpectedExitError,
@@ -66,7 +54,6 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match self.error_type {
             ErrorType::IoError(ref err) => err.description(),
-            ErrorType::RecvError(ref err) => err.description(),
             ErrorType::SysUtilError(ref err) => err.description(),
             ErrorType::MessageTypeError => "Message type error",
             ErrorType::UnexpectedExitError => "Unexpected exit",
@@ -79,7 +66,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.error_type {
             ErrorType::IoError(ref err) => err.fmt(f),
-            ErrorType::RecvError(ref err) => err.fmt(f),
             ErrorType::SysUtilError(ref err) => err.fmt(f),
             ErrorType::MessageTypeError => write!(f, "Message type error"),
             ErrorType::UnexpectedExitError => write!(f, "Unexpected exit"),
@@ -92,14 +78,6 @@ impl From<io::Error> for Error {
     fn from(io_err: io::Error) -> Error {
         Error {
             error_type: ErrorType::IoError(io_err),
-        }
-    }
-}
-
-impl From<RecvError> for Error {
-    fn from(recv_err: RecvError) -> Error {
-        Error {
-            error_type: ErrorType::RecvError(recv_err),
         }
     }
 }
@@ -189,8 +167,8 @@ impl CrasClientMessage {
     }
 }
 
-fn handle_connect_message<'a>(inner: &CrasClientInner) -> Result<HandleResult, Error> {
-    let message = CrasClientMessage::try_new(&inner.server_socket)?;
+fn handle_connect_message<'a>(server_socket: &CrasServerSocket) -> Result<HandleResult, Error> {
+    let message = CrasClientMessage::try_new(&server_socket)?;
     match message.get_id() {
         CRAS_CLIENT_MESSAGE_ID::CRAS_CLIENT_CONNECTED => {
             let cmsg = message.get_message::<cras_client_connected>();
@@ -211,34 +189,8 @@ fn handle_connect_message<'a>(inner: &CrasClientInner) -> Result<HandleResult, E
     }
 }
 
-struct CrasClientInner {
-    pub server_socket: CrasServerSocket,
-    stream_channels: RwLock<HashMap<u32, Mutex<Sender<CrasStreamRc>>>>,
-}
-
-impl CrasClientInner {
-    fn wait_and_handle_server_message(&self) -> Result<HandleResult, Error> {
-        #[derive(PollToken)]
-        enum Token {
-            ServerMsg,
-        }
-        let poll_ctx: PollContext<Token> = PollContext::new()
-            .and_then(|pc| pc.add(&self.server_socket, Token::ServerMsg).and(Ok(pc)))?;
-        let events = poll_ctx.wait()?;
-        for event in events.iter_readable() {
-            match event.token() {
-                Token::ServerMsg => {
-                    println!("poll by server msg!");
-                    return handle_connect_message(&self);
-                }
-            }
-        }
-        Err(Error::new(ErrorType::UnexpectedExitError))
-    }
-}
-
 pub struct CrasClient {
-    inner: Arc<CrasClientInner>,
+    server_socket: CrasServerSocket,
     client_id: i32,
     next_stream_id: u32,
 }
@@ -268,13 +220,9 @@ pub fn cras_audio_format_packed_new(
 impl CrasClient {
     pub fn new() -> Result<CrasClient, Error> {
         let server_socket = CrasServerSocket::new()?;
-        let inner = Arc::new(CrasClientInner {
-            server_socket,
-            stream_channels: RwLock::new(HashMap::new()),
-        });
 
         Ok(CrasClient {
-            inner,
+            server_socket,
             client_id: -1,
             next_stream_id: 0,
         })
@@ -330,17 +278,8 @@ impl CrasClient {
             )
         };
 
-        // Create stream_channel and add it to the client
-        let (sender, receiver) = channel::<CrasStreamRc>();
-        self.inner
-            .stream_channels
-            .write()
-            .unwrap()
-            .insert(stream_id, Mutex::new(sender));
-
         // Send `CRAS_SERVER_CONNECT_STREAM` message
         let res = &self
-            .inner
             .server_socket
             .send_server_message_with_fds(&server_cmsg, &socket_vector[1..]);
         println!("res: {:?}", res);
@@ -349,18 +288,17 @@ impl CrasClient {
 
         let mut stream = CrasStream::new(
             stream_id,
-            self.inner.server_socket.try_clone().unwrap(),
+            self.server_socket.try_clone().unwrap(),
             block_size,
             direction,
             rate,
             channel_num,
             format,
             audio_fd,
-            receiver,
         );
 
         loop {
-            match self.inner.wait_and_handle_server_message() {
+            match self.wait_and_handle_server_message() {
                 Ok(HandleResult::ClientStreamShm(stream_id, shm_fd)) => {
                     stream.init_shm(shm_fd).unwrap();
                     break;
@@ -374,7 +312,22 @@ impl CrasClient {
     }
 
     fn wait_and_handle_server_message(&self) -> Result<HandleResult, Error> {
-        self.inner.wait_and_handle_server_message()
+        #[derive(PollToken)]
+        enum Token {
+            ServerMsg,
+        }
+        let poll_ctx: PollContext<Token> = PollContext::new()
+            .and_then(|pc| pc.add(&self.server_socket, Token::ServerMsg).and(Ok(pc)))?;
+        let events = poll_ctx.wait()?;
+        for event in events.iter_readable() {
+            match event.token() {
+                Token::ServerMsg => {
+                    println!("poll by server msg!");
+                    return handle_connect_message(&self.server_socket);
+                }
+            }
+        }
+        Err(Error::new(ErrorType::UnexpectedExitError))
     }
 
     pub fn new_and_connect_blocking() -> Result<CrasClient, Error> {
@@ -388,8 +341,6 @@ impl CrasClient {
                 }
             }
         };
-
-        let inner = cras_client.inner.clone();
 
         println!("CrasClient id: {}", &cras_client.client_id);
         Ok(cras_client)

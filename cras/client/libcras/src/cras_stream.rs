@@ -4,7 +4,6 @@
 use std::io;
 use std::io::Write;
 use std::mem;
-use std::sync::mpsc::{Receiver, RecvError};
 use std::{error, fmt};
 
 use cras_common::gen::*;
@@ -15,7 +14,6 @@ use AudioFd;
 #[derive(Debug)]
 pub enum ErrorType {
     IoError(io::Error),
-    RecvError(RecvError),
     MessageTypeError,
     NoShmError,
 }
@@ -35,7 +33,6 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match self.error_type {
             ErrorType::IoError(ref err) => err.description(),
-            ErrorType::RecvError(ref err) => err.description(),
             ErrorType::MessageTypeError => "Message type error",
             ErrorType::NoShmError => "CrasAudioShmArea is not created",
         }
@@ -46,7 +43,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.error_type {
             ErrorType::IoError(ref err) => err.fmt(f),
-            ErrorType::RecvError(ref err) => err.fmt(f),
             ErrorType::MessageTypeError => write!(f, "Message type error"),
             ErrorType::NoShmError => write!(f, "CrasAudioShmArea is not created"),
         }
@@ -124,12 +120,6 @@ impl<'a> CrasPlaybackDrop for CrasAudioShmAreaControl<'a> {
     }
 }
 
-/// Message returned from `CrasClient` through stream_channel
-pub enum CrasStreamRc {
-    ClientStreamShm(CrasShmFd),
-    RemoveSuccess,
-}
-
 struct CrasStreamControls {
     audio_fd: AudioFd,
     header: Option<CrasAudioHeader>,
@@ -159,8 +149,6 @@ pub struct CrasStream<'a> {
     /// A structure for stream to interact with server audio thread
     controls: CrasStreamControls,
     audio_buffer: Option<CrasAudioBuffer<'a>>,
-    /// A receiver for message from `CrasClient`
-    stream_channel: Receiver<CrasStreamRc>,
 }
 
 impl<'a> CrasStream<'a> {
@@ -177,7 +165,6 @@ impl<'a> CrasStream<'a> {
         channel_num: usize,
         format: snd_pcm_format_t,
         aud_fd: AudioFd,
-        stream_channel: Receiver<CrasStreamRc>,
     ) -> CrasStream<'a> {
         CrasStream {
             stream_id,
@@ -192,7 +179,6 @@ impl<'a> CrasStream<'a> {
                 header: None,
             },
             audio_buffer: None,
-            stream_channel,
         }
     }
 
