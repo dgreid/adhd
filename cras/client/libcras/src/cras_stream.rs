@@ -138,7 +138,7 @@ impl CrasPlaybackDrop for CrasStreamControls {
 }
 
 #[allow(dead_code)]
-pub struct CrasStream<'a> {
+pub struct CrasStream {
     stream_id: u32,
     server_socket: CrasServerSocket,
     block_size: u32,
@@ -148,10 +148,10 @@ pub struct CrasStream<'a> {
     format: snd_pcm_format_t,
     /// A structure for stream to interact with server audio thread
     controls: CrasStreamControls,
-    audio_buffer: Option<CrasAudioBuffer<'a>>,
+    audio_buffer: Option<CrasAudioBuffer>,
 }
 
-impl<'a> CrasStream<'a> {
+impl CrasStream {
     /// Create a CrasStream by given arguments.
     ///
     /// # Returns
@@ -165,7 +165,7 @@ impl<'a> CrasStream<'a> {
         channel_num: usize,
         format: snd_pcm_format_t,
         aud_fd: AudioFd,
-    ) -> CrasStream<'a> {
+    ) -> CrasStream {
         CrasStream {
             stream_id,
             server_socket,
@@ -184,8 +184,7 @@ impl<'a> CrasStream<'a> {
 
     /// Receive shared memory fd and initialize stream audio shared memory area
     pub fn init_shm(&mut self, shm_fd: CrasShmFd) -> Result<(), Error> {
-        let shm = CrasSharedMemory::new(shm_fd)?;
-        let (buffer, header) = create_header_and_buffers(shm);
+        let (buffer, header) = create_header_and_buffers(shm_fd);
         self.controls.header = Some(header);
         self.audio_buffer = Some(buffer);
         Ok(())
@@ -231,7 +230,7 @@ impl<'a> CrasStream<'a> {
     }
 }
 
-impl<'a> Drop for CrasStream<'a> {
+impl Drop for CrasStream {
     /// A blocking drop function, send message to `CrasClient` and wait for
     /// return message.
     /// Write error message to stderr if the method fail.

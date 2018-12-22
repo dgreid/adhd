@@ -227,11 +227,29 @@ impl cras_audio_shm_area {
 }
 
 // A safe mmap function with error handling
-fn cras_mmap(len: usize, prot: libc::c_int, fd: libc::c_int) -> io::Result<*mut libc::c_void> {
-    match unsafe { libc::mmap(ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0) } {
+fn cras_mmap_offset(
+    len: usize,
+    prot: libc::c_int,
+    fd: libc::c_int,
+    offset: usize,
+) -> io::Result<*mut libc::c_void> {
+    match unsafe {
+        libc::mmap(
+            ptr::null_mut(),
+            len,
+            prot,
+            libc::MAP_SHARED,
+            fd,
+            offset as i64,
+        )
+    } {
         libc::MAP_FAILED => Err(io::Error::last_os_error()),
         shm_ptr => Ok(shm_ptr),
     }
+}
+
+fn cras_mmap(len: usize, prot: libc::c_int, fd: libc::c_int) -> io::Result<*mut libc::c_void> {
+    cras_mmap_offset(len, prot, fd, 0)
 }
 
 /// A generic structure for an opened shared memory file descriptor with its
@@ -300,24 +318,33 @@ impl<'a, T: 'a + ?Sized> Drop for CrasShm<'a, T> {
 /// they point to different parts of the memory.
 /// The lifetime could be removed since the buffer only stay in stream and it
 /// owns the data.
-pub struct CrasAudioBuffer<'a> {
+pub struct CrasAudioBuffer {
     addr: *mut u8,
     size: usize,
-    phantom: PhantomData<&'a u8>,
-    cras_shm: Arc<CrasSharedMemory>,
+    mmap_addr: *mut u8,
+    mmap_size: usize,
 }
+unsafe impl Send for CrasAudioBuffer {}
 
-impl<'a> CrasAudioBuffer<'a> {
+impl CrasAudioBuffer {
     pub fn get(&mut self, offset: isize, len: usize) -> &mut [u8] {
         unsafe { slice::from_raw_parts_mut(self.addr.offset(offset), len) }
     }
 }
 
+impl Drop for CrasAudioBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.mmap_addr as *mut _, self.mmap_size);
+        }
+    }
+}
+
 pub struct CrasAudioHeader {
     addr: *mut cras_audio_shm_area_header,
-    cras_shm: Arc<CrasSharedMemory>,
     samples_len: usize,
 }
+unsafe impl Send for CrasAudioHeader {}
 
 impl CrasAudioHeader {
     pub fn get(&mut self) -> CrasAudioShmAreaHeader {
@@ -328,59 +355,43 @@ impl CrasAudioHeader {
     }
 }
 
+impl Drop for CrasAudioHeader {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(
+                self.addr as *mut _,
+                mem::size_of::<cras_audio_shm_area_header>(),
+            );
+        }
+    }
+}
+
 /// Create header and buffer from given shared memory.
-pub fn create_header_and_buffers<'a>(
-    cras_shm: CrasSharedMemory,
-) -> (CrasAudioBuffer<'a>, CrasAudioHeader) {
-    let cras_shm = Arc::new(cras_shm);
+pub fn create_header_and_buffers(fd: CrasShmFd) -> (CrasAudioBuffer, CrasAudioHeader) {
     let samples_offset = cras_audio_shm_area::offset_of_samples();
-    // [TODO] check if this failed
-    let samples_len = cras_shm.shm_size - samples_offset;
-    let mut header = CrasAudioHeader {
-        addr: cras_shm.shm_ptr as *mut _,
-        cras_shm: cras_shm.clone(),
+    let shm_size = fd.shm_max_size;
+    let samples_len = shm_size - samples_offset;
+
+    // It is important that these two regions don't overlap so that there isn't any memory aliased.
+    let header = CrasAudioHeader {
+        addr: cras_mmap(
+            mem::size_of::<cras_audio_shm_area_header>(),
+            libc::PROT_READ | libc::PROT_WRITE,
+            fd.fd,
+        )
+        .unwrap() as *mut _,
         samples_len,
     };
 
-    let buffer_ptr = unsafe { cras_shm.shm_ptr.offset(samples_offset as isize) };
-    (
-        CrasAudioBuffer {
-            addr: buffer_ptr as *mut _,
-            size: samples_len,
-            cras_shm: cras_shm.clone(),
-            phantom: PhantomData,
-        },
-        header,
-    )
-}
+    let base_mmap_addr = cras_mmap(shm_size, libc::PROT_READ | libc::PROT_WRITE, fd.fd).unwrap();
+    let buffer = CrasAudioBuffer {
+        addr: (base_mmap_addr as usize + samples_offset) as *mut _,
+        size: samples_len,
+        mmap_addr: base_mmap_addr as *mut _,
+        mmap_size: shm_size,
+    };
 
-pub struct CrasSharedMemory {
-    shm_fd: libc::c_int,
-    /// A shared memory pointer created from `shm_fd`.
-    /// The structure will call `munmap` for this pointer in `drop`.
-    shm_ptr: *mut libc::c_void,
-    /// Size of the shared memory.
-    shm_size: usize,
-}
-
-impl CrasSharedMemory {
-    pub fn new(fd: CrasShmFd) -> io::Result<CrasSharedMemory> {
-        let shm_ptr = cras_mmap(fd.shm_max_size, libc::PROT_READ | libc::PROT_WRITE, fd.fd)?;
-        Ok(CrasSharedMemory {
-            shm_fd: fd.fd,
-            shm_ptr,
-            shm_size: fd.shm_max_size,
-        })
-    }
-}
-
-impl Drop for CrasSharedMemory {
-    fn drop(&mut self) {
-        unsafe {
-            libc::munmap(self.shm_ptr, self.shm_size);
-            libc::close(self.shm_fd);
-        }
-    }
+    (buffer, header)
 }
 
 /// A structure wrapping a shared memory and its size.
@@ -407,6 +418,14 @@ impl CrasShmFd {
 impl AsRawFd for CrasShmFd {
     fn as_raw_fd(&self) -> RawFd {
         self.fd
+    }
+}
+
+impl Drop for CrasShmFd {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
     }
 }
 

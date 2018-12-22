@@ -4,6 +4,7 @@
 use std::env;
 use std::fs::File;
 use std::io::Read;
+use std::thread::spawn;
 
 extern crate libcras;
 use libcras::*;
@@ -32,21 +33,25 @@ fn main() {
 
             // Play raw file and call get_playback_buffer 1000 times
             // than close the stream
-            let mut file = File::open(&args[1]).unwrap();
-            let mut local_buffer = [0u8; 1024];
-            for _i in 0..1000 {
-                let mut buffer = stream.next_playback_buffer().unwrap();
+            let thread = spawn(move || {
+                let mut file = File::open(&args[1]).unwrap();
+                let mut local_buffer = [0u8; 1024];
+                for _i in 0..1000 {
+                    let mut buffer = stream.next_playback_buffer().unwrap();
 
-                // read to local buffer from file
-                let read_count = file.read(&mut local_buffer).unwrap();
-                println!("read_count: {}", read_count);
+                    // read to local buffer from file
+                    let read_count = file.read(&mut local_buffer).unwrap();
+                    println!("read_count: {}", read_count);
 
-                let write_frames = buffer.write_frames(&local_buffer).unwrap();
-                println!(
-                    "write_frames: {}, frame_size {}",
-                    write_frames, buffer.frame_size
-                );
-            }
+                    let write_frames =
+                        buffer.write_frames(&local_buffer).unwrap();
+                    println!(
+                        "write_frames: {}, frame_size {}",
+                        write_frames, buffer.frame_size
+                    );
+                }
+            });
+            thread.join();
             // Stream and client should gracefully be closed out of this scope
         }
         _ => {
