@@ -28,7 +28,6 @@ where
     S: Signal,
 {
     signals: &'a mut [S],
-    equilibrium_frame: <<S::Frame as Frame>::Sample as Sample>::Signed,
 }
 
 impl<'a, S> Signal for SignalMixer<'a, S>
@@ -51,34 +50,103 @@ where
         self.signals.iter().any(|s| s.is_exhausted())
     }
 }
-/*
-impl<'a, S, F> Signal for SignalMixer<'a, S, F>
+
+/// An `Iterator` that blocks any dc offset present in the signal.
+pub struct DCFiltered<S>
 where
     S: Signal,
-    F: Frame<
-        Sample = <<S::Frame as Frame>::Sample as Sample>::Signed,
-        NumChannels = <S::Frame as Frame>::NumChannels,
-    >,
+{
+    signal: S,
+    r: <S::Frame as Frame>::Sample, // coefficient of the filter
+    // Filter state.
+    x_prev: <S::Frame as Frame>::Signed,
+    y_prev: <S::Frame as Frame>::Signed,
+}
+
+impl<S> Signal for DCFiltered<S>
+where
+    S: Signal,
 {
     type Frame = S::Frame;
 
+    #[inline]
     fn next(&mut self) -> Self::Frame {
-        let mut frame = self.equilibrium_frame;
-        for s in self.signals {
-            frame.add_amp(s.next());
-        }
-        frame
+        let x = self.signal.next().to_signed_frame();
+        // d = x - x_prev + r * y_prev;
+        let neg_prev = self.x_prev.scale_amp((-1.0).to_sample());
+        let d = x.add_amp(neg_prev).add_amp(
+            self.y_prev
+                .scale_amp(self.r.to_signed_sample().to_float_sample()),
+        );
+        self.y_prev = d;
+        self.x_prev = x;
+        Self::Frame::equilibrium().add_amp(d)
     }
 
+    #[inline]
     fn is_exhausted(&self) -> bool {
-        self.signals.iter().any(|s| s.is_exhausted())
+        self.signal.is_exhausted()
     }
 }
-*/
+
+/// An 'Iterator' that mutes the samples from its signal.
+pub struct Muted<S>
+where
+    S: Signal,
+{
+    signal: S,
+}
+
+impl<S> Signal for Muted<S>
+where
+    S: Signal,
+{
+    type Frame = S::Frame;
+
+    #[inline]
+    fn next(&mut self) -> Self::Frame {
+        Self::Frame::equilibrium()
+    }
+
+    #[inline]
+    fn is_exhausted(&self) -> bool {
+        self.signal.is_exhausted()
+    }
+}
+
+/// Addition to `Signal` that adds some basic processing functions.
+trait DspProcessable {
+    fn mute(self) -> Muted<Self>
+    where
+        Self: Sized + Signal,
+    {
+        Muted { signal: self }
+    }
+
+    fn db_block<S>(self, coefficient: S) -> DCFiltered<Self>
+    where
+        Self: Sized + Signal,
+        S: Sample,
+        Self::Frame: Frame<Sample = S>,
+    {
+        DCFiltered {
+            signal: self,
+            r: coefficient,
+            y_prev: Self::Frame::equilibrium().to_signed_frame(),
+            x_prev: Self::Frame::equilibrium().to_signed_frame(),
+        }
+    }
+}
+
+impl<S: Signal> DspProcessable for S {}
+
 pub fn streams_ready<S>(streams: &mut [S])
 where
     S: Signal,
 {
+    let mix_in = SignalMixer { signals: streams };
+
+    mix_in.scale_amp(0.7.to_sample()).mute();
 }
 
 #[cfg(test)]
