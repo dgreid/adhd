@@ -20,11 +20,38 @@ where
     }
 }
 
-struct SignalMixer<'a, S, F> {
+/// Provides an iterator that offsets the amplitude of every channel in each frame of the
+/// /// signal by some sample value and yields the resulting frames.
+//#[derive(Clone)]
+pub struct SignalMixer<'a, S>
+where
+    S: Signal,
+{
     signals: &'a mut [S],
-    equilibrium_frame: F,
+    equilibrium_frame: <<S::Frame as Frame>::Sample as Sample>::Signed,
 }
 
+impl<'a, S> Signal for SignalMixer<'a, S>
+where
+    S: Signal,
+{
+    type Frame = S::Frame;
+
+    #[inline]
+    fn next(&mut self) -> Self::Frame {
+        let mut frame = self.signals[0].next();
+        for s in &mut self.signals[0..] {
+            frame = frame.add_amp(s.next().to_signed_frame());
+        }
+        frame
+    }
+
+    #[inline]
+    fn is_exhausted(&self) -> bool {
+        self.signals.iter().any(|s| s.is_exhausted())
+    }
+}
+/*
 impl<'a, S, F> Signal for SignalMixer<'a, S, F>
 where
     S: Signal,
@@ -47,7 +74,7 @@ where
         self.signals.iter().any(|s| s.is_exhausted())
     }
 }
-
+*/
 pub fn streams_ready<S>(streams: &mut [S])
 where
     S: Signal,
@@ -70,6 +97,6 @@ mod tests {
 
     #[test]
     fn single_stream() {
-        let signal_in = sample::rate(48000).const_hz(440).sine();
+        let signal_in = signal::rate(48000.0).const_hz(440.0).sine();
     }
 }
