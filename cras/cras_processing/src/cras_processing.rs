@@ -2,44 +2,46 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use num_traits::cast::{FromPrimitive, ToPrimitive};
-use sample::{self, Frame, Sample, Signal};
+use sample::{self, Frame, FromSample, Sample, Signal};
 
-pub fn process_to<S, T>(samples_in: &[S], samples_out: &mut [T])
+pub fn process<F, T>(signals: &mut Vec<Box<dyn Signal<Frame = F>>>, samples_out: &mut [T])
 where
-    S: Default + ToPrimitive,
-    T: Default + FromPrimitive,
+    F: Frame<Sample = f32>,
+    T: Frame<NumChannels = <F as Frame>::NumChannels>,
+    T::Sample: FromSample<f32>,
 {
-    for (processed_sample, sample_out) in samples_in
-        .iter()
-        .map(|sample_in| sample_in.to_f32().unwrap_or(Default::default()))
-        .map(|float_sample| T::from_f32(float_sample).unwrap_or(Default::default()))
+    let mix = SignalMixer { signals };
+    for (s, out) in mix
+        .dc_block(0.7)
+        .scale_amp(0.5)
+        .take(48000)
+        .map(|frame| frame.map(|sample| sample.to_sample::<T::Sample>()))
         .zip(samples_out.iter_mut())
     {
-        *sample_out = processed_sample as T;
+        *out = s;
     }
 }
 
 /// Provides an iterator that offsets the amplitude of every channel in each frame of the
-/// /// signal by some sample value and yields the resulting frames.
+/// signal by some sample value and yields the resulting frames.
 //#[derive(Clone)]
-pub struct SignalMixer<'a, S>
+pub struct SignalMixer<'a, F>
 where
-    S: Signal,
+    F: Frame,
 {
-    signals: &'a mut [S],
+    signals: &'a mut Vec<Box<dyn Signal<Frame = F>>>,
 }
 
-impl<'a, S> Signal for SignalMixer<'a, S>
+impl<'a, F> Signal for SignalMixer<'a, F>
 where
-    S: Signal,
+    F: Frame,
 {
-    type Frame = S::Frame;
+    type Frame = F;
 
     #[inline]
     fn next(&mut self) -> Self::Frame {
-        let mut frame = self.signals[0].next();
-        for s in &mut self.signals[0..] {
+        let mut frame = Self::Frame::equilibrium();
+        for s in self.signals.iter_mut() {
             frame = frame.add_amp(s.next().to_signed_frame());
         }
         frame
@@ -123,7 +125,7 @@ trait DspProcessable {
         Muted { signal: self }
     }
 
-    fn db_block<S>(self, coefficient: S) -> DCFiltered<Self>
+    fn dc_block<S>(self, coefficient: S) -> DCFiltered<Self>
     where
         Self: Sized + Signal,
         S: Sample,
@@ -140,31 +142,25 @@ trait DspProcessable {
 
 impl<S: Signal> DspProcessable for S {}
 
-pub fn streams_ready<S>(streams: &mut [S])
-where
-    S: Signal,
-{
-    let mix_in = SignalMixer { signals: streams };
-
-    mix_in.scale_amp(0.7.to_sample()).mute();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use sample::signal;
-
-    #[test]
-    fn frames() {
-        let pb_buf = [0x5500i16; 480];
-        let mut out = [0i32; 480];
-        process_to(&pb_buf, &mut out[..]);
-        assert_eq!(out[0], 0x5500);
-    }
+    use sample::{signal, Frame, Sample, Signal};
 
     #[test]
     fn single_stream() {
-        let signal_in = signal::rate(48000.0).const_hz(440.0).sine();
+        let mut signals: Vec<Box<dyn Signal<Frame = [f32; 1]>>> = vec![
+            Box::new(
+                signal::rate(48000.0)
+                    .const_hz(440.0)
+                    .sine()
+                    .map(|f| f.map(|s| s.to_sample::<f32>())),
+            ),
+            Box::new(signal::from_iter(std::iter::repeat([0.25f32; 1]))),
+        ];
+        let mut out_mem = [[0i32; 1]; 48000];
+
+        process(&mut signals, &mut out_mem);
     }
 }
