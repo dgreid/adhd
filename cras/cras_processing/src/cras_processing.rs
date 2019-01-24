@@ -117,7 +117,7 @@ where
 }
 
 /// Addition to `Signal` that adds some basic processing functions.
-trait DspProcessable {
+pub trait DspProcessable {
     fn mute(self) -> Muted<Self>
     where
         Self: Sized + Signal,
