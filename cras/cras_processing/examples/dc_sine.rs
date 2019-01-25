@@ -32,7 +32,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         .scale_amp(0.5)
         .add_amp(signal::gen(|| [0.1]))
         .map(|f: [f32; 1]| [f[0], f[0]])
-        .dc_block(0.99)
+        //        .dc_block(0.99)
         .map(|f| f.map(|s| s.to_sample::<i16>()))
         .map(|f: [i16; 2]| f.add_amp([0i16, 0i16]));
 
