@@ -27,41 +27,26 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
     let in_file = OpenOptions::new().read(true).open(input)?;
     let num_frames = in_file.metadata()?.len() / 4;
     let mut in_file = BufReader::new(in_file);
-    let mut frames_in = Vec::with_capacity(num_frames as usize);
-    let mut out_buf = Vec::with_capacity(num_frames as usize * 4);
-    let mut buf = [0u8; 4];
-    while let Ok(4) = in_file.read(&mut buf) {
-        frames_in.push([
+    let mut frames_in = vec![[0.0f32; 2]; num_frames as usize];
+    for frame_in in frames_in.iter_mut() {
+        let mut buf = [0u8; 4];
+        in_file.read_exact(&mut buf)?;
+        *frame_in = [
             i16::from_le_bytes([buf[0], buf[1]]).to_sample::<f32>(),
             i16::from_le_bytes([buf[2], buf[3]]).to_sample::<f32>(),
-        ]);
+        ];
     }
 
-    let out_signal = signal::from_iter(frames_in.into_iter()).dc_block(0.995);
-
-    let mut frames_out = vec![[0.0f32; 2]; num_frames as usize];
+    let mut frames_out = vec![[0i16; 2]; num_frames as usize];
 
     let start_time = Instant::now();
+    let out_signal = signal::from_iter(frames_in.into_iter())
+        .dc_block(0.995)
+        .map(|f| f.map(|s| s.to_sample::<i16>()));
     for (frame_out, signal_frame) in frames_out.iter_mut().zip(out_signal.until_exhausted()) {
         *frame_out = signal_frame;
     }
     let elapsed = start_time.elapsed();
-
-    for f in signal::from_iter(frames_out)
-        .map(|f| f.map(|s| s.to_sample::<i16>()))
-        //.map(|f: [i16; 2]| f.add_amp([0i16, 0i16]))
-        .until_exhausted()
-    {
-        let _f2: [i16; 2] = f; // just for type annotation.
-        let bytes = f[0].to_le_bytes();
-        for b in &bytes {
-            out_buf.push(*b);
-        }
-        let bytes = f[1].to_le_bytes();
-        for b in &bytes {
-            out_buf.push(*b);
-        }
-    }
 
     let mut out_file = BufWriter::new(
         OpenOptions::new()
@@ -71,7 +56,14 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
             .open(output)?,
     );
 
-    out_file.write(&out_buf)?;
+    unsafe {
+        // It's fine. The slice is dropped right away, frames_out will certainly out live it.
+        let out_buf: &[u8] = std::slice::from_raw_parts(
+            frames_out.as_ptr() as *const u8,
+            frames_out.len() * std::mem::size_of::<i16>(),
+        );
+        out_file.write(&out_buf)?;
+    }
     println!(
         "processing took {} seconds {} nanoseconds for {} frames",
         elapsed.as_secs(),
