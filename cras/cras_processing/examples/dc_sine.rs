@@ -33,7 +33,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         .map(|f| f.map(|s| s.to_sample::<i16>()))
         .map(|f: [i16; 2]| f.add_amp([0i16, 0i16]));
 
-    for f in sine.take(48000 * 10) {
+    for f in sine.take(48000 * 1000) {
         file.write(&f[0].to_le_bytes())?;
         file.write(&f[1].to_le_bytes())?;
     }
