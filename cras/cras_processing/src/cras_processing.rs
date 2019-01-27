@@ -235,13 +235,12 @@ pub trait DspProcessable {
         BiQuad::new(self, b0, b1, b2, a0, a1, a2)
     }
 
-    /// Passed the signal through lowpass filter. The frequency must be between 0.0 and 1.0.
-    fn low_pass<S>(self, cutoff_freq: f64, resonance: f64) -> BiQuad<Self>
+    /// Passes the signal through lowpass filter. The frequency must be between 0.0 and 1.0.
+    fn low_pass(self, cutoff_freq: f64, resonance: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
         <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
             sample::conv::FromSample<f64>,
-        S: Signal,
     {
         match cutoff_freq {
             _f if _f >= 1.0 => {
@@ -260,7 +259,7 @@ pub trait DspProcessable {
                 let d: f64 = ((4.0 - (16.0 - 16.0 / (g * g)).sqrt()) / 2.0).sqrt();
 
                 let theta: f64 = std::f64::consts::PI * f;
-                let sn: f64 = 0.5 * d * theta.cos();
+                let sn: f64 = 0.5 * d * theta.sin();
                 let beta: f64 = 0.5 * (1.0 - sn) / (1.0 + sn);
                 let gamma: f64 = (0.5 + beta) * theta.cos();
                 let alpha: f64 = 0.25 * (0.5 + beta - gamma);
@@ -271,6 +270,231 @@ pub trait DspProcessable {
                 let a1: f64 = 2.0 * -gamma;
                 let a2: f64 = 2.0 * beta;
                 BiQuad::new(self, b0, b1, b2, 1.0, a1, a2)
+            }
+        }
+    }
+
+    /// Passes the signal through highpass filter. The frequency must be between 0.0 and 1.0.
+    fn high_pass(self, cutoff_freq: f64, resonance: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        match cutoff_freq {
+            _f if _f >= 1.0 => {
+                // When cutoff is one, nothing gets through the filter, so set
+                // coefficients up correctly.
+                BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            _f if _f <= 0.0 => {
+                // When cutoff is zero, the z-transform is 1.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                // Compute biquad coefficients for highpass filter
+                let resonance = if resonance < 0.0 { 0.0 } else { resonance }; // can't go negative
+                let g: f64 = 10.0_f64.powf(0.05 * resonance);
+                let d: f64 = ((4.0 - (16.0 - 16.0 / (g * g)).sqrt()) / 2.0).sqrt();
+
+                let theta: f64 = std::f64::consts::PI * f;
+                let sn: f64 = 0.5 * d * theta.sin();
+                let beta: f64 = 0.5 * (1.0 - sn) / (1.0 + sn);
+                let gamma: f64 = (0.5 + beta) * theta.cos();
+                let alpha: f64 = 0.25 * (0.5 + beta + gamma);
+
+                let b0: f64 = 2.0 * alpha;
+                let b1: f64 = 2.0 * -2.0 * alpha;
+                let b2: f64 = 2.0 * alpha;
+                let a1: f64 = 2.0 * -gamma;
+                let a2: f64 = 2.0 * beta;
+                BiQuad::new(self, b0, b1, b2, 1.0, a1, a2)
+            }
+        }
+    }
+
+    /// Passes the signal through a bandpass filter.
+    fn bandpass(self, freq: f64, q: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        if q <= 0.0 {
+            // When Q = 0, the formulas have problems. If we look at the z-transform, we can
+            // see that the limit as Q->0 is 1, so set the filter that way.
+            return BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+        }
+
+        match freq {
+            f if f > 0.0 && f < 1.0 => {
+                let w0 = std::f64::consts::PI * f;
+                let alpha = w0.sin() / (2.0 * q);
+                let k = w0.cos();
+
+                let b0 = alpha;
+                let b1 = 0.0;
+                let b2 = -alpha;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * k;
+                let a2 = 1.0 - alpha;
+
+                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+            }
+            _ => {
+                // When the cutoff is zero, the z-transform approaches 0, if Q > 0. When both Q and
+                // cutoff are zero, the z-transform is pretty much undefined. What should we do in
+                // this case?  For now, just make the filter 0. When the cutoff is 1, the
+                // z-transform also approaches 0.
+                BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+        }
+    }
+
+    /// Passes the signal through a low shelf filter.
+    fn low_shelf(self, freq: f64, db_gain: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        let a = 10.0_f64.powf(db_gain / 40.0);
+
+        match freq {
+            _f if _f >= 1.0 => {
+                // Passes through applying a constant gain.
+                BiQuad::new(self, a * a, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            _f if _f <= 0.0 => {
+                // The signal in unaffected it the shelf is at zero.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                let w0 = std::f64::consts::PI * f;
+                let s = 1.0; // filter slope (one is the max value)
+                let alpha = 0.5 * w0.sin() * ((a + 1.0 / a) * (1.0 / s - 1.0) + 2.0).sqrt();
+                let k = w0.cos();
+                let k2 = 2.0 * a.sqrt() * alpha;
+                let a_plus_one = a + 1.0;
+                let a_minus_one = a - 1.0;
+
+                let b0 = a * (a_plus_one - a_minus_one * k + k2);
+                let b1 = 2.0 * a * (a_minus_one - a_plus_one * k);
+                let b2 = a * (a_plus_one - a_minus_one * k - k2);
+                let a0 = a_plus_one + a_minus_one * k + k2;
+                let a1 = -2.0 * (a_minus_one + a_plus_one * k);
+                let a2 = a_plus_one + a_minus_one * k - k2;
+
+                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+            }
+        }
+    }
+
+    /// Passes the signal through a high shelf filter.
+    fn high_shelf(self, freq: f64, db_gain: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        let a = 10.0_f64.powf(db_gain / 40.0);
+
+        match freq {
+            _f if _f >= 1.0 => {
+                // The signal in unaffected it the shelf is past the highest frequency.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            _f if _f <= 0.0 => {
+                // Passes through applying a constant gain (all shelf).
+                BiQuad::new(self, a * a, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                let w0 = std::f64::consts::PI * f;
+                let s = 1.0; // filter slope (one is the max value)
+                let alpha = 0.5 * w0.sin() * ((a + 1.0 / a) * (1.0 / s - 1.0) + 2.0).sqrt();
+                let k = w0.cos();
+                let k2 = 2.0 * a.sqrt() * alpha;
+                let a_plus_one = a + 1.0;
+                let a_minus_one = a - 1.0;
+
+                let b0 = a * (a_plus_one + a_minus_one * k + k2);
+                let b1 = 2.0 * a * (a_minus_one + a_plus_one * k);
+                let b2 = a * (a_plus_one + a_minus_one * k - k2);
+                let a0 = a_plus_one - a_minus_one * k + k2;
+                let a1 = -2.0 * (a_minus_one - a_plus_one * k);
+                let a2 = a_plus_one - a_minus_one * k - k2;
+
+                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+            }
+        }
+    }
+
+    /// Passes the signal through a peaking filter.
+    fn peaking(self, freq: f64, q: f64, db_gain: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        let a = 10.0_f64.powf(db_gain / 40.0);
+
+        match freq {
+            _f if _f <= 0.0 || _f >= 1.0 => {
+                // When the frequency is zero or one, the signal in unaffected.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                if q <= 0.0 {
+                    // When Q = 0, the above formulas have problems. If we look at the z-transform, we can
+                    // see that the limit as Q->0 is A^2, so set the filter that way.
+                    return BiQuad::new(self, a * a, 0.0, 0.0, 1.0, 0.0, 0.0);
+                }
+                let w0 = std::f64::consts::PI * f;
+                let alpha = w0.sin() / (2.0 * q);
+                let k = w0.cos();
+
+                let b0 = 1.0 + alpha * a;
+                let b1 = -2.0 * k;
+                let b2 = 1.0 - alpha * a;
+                let a0 = 1.0 + alpha / a;
+                let a1 = -2.0 * k;
+                let a2 = 1.0 - alpha / a;
+
+                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+            }
+        }
+    }
+
+    /// Passes the signal through a notch filter.
+    fn notch(self, freq: f64, q: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        match freq {
+            _f if _f <= 0.0 || _f >= 1.0 => {
+                // When the frequency is zero or one, the signal in unaffected.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                if q <= 0.0 {
+                    // When Q = 0, the above formulas have problems. If we look at the z-transform,
+                    // we can see that the limit as Q->0 is 0, so set the filter that way.
+                    return BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+                }
+                let w0 = std::f64::consts::PI * f;
+                let alpha = w0.sin() / (2.0 * q);
+                let k = w0.cos();
+
+                let b0 = 1.0;
+                let b1 = -2.0 * k;
+                let b2 = 1.0;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * k;
+                let a2 = 1.0 - alpha;
+
+                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
             }
         }
     }
