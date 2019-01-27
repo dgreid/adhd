@@ -224,6 +224,56 @@ pub trait DspProcessable {
             x_prev: Self::Frame::equilibrium().to_signed_frame(),
         }
     }
+
+    fn biquad<S>(self, b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+        S: Signal,
+    {
+        BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+    }
+
+    /// Passed the signal through lowpass filter. The frequency must be between 0.0 and 1.0.
+    fn low_pass<S>(self, signal: S, cutoff_freq: f64, resonance: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+        S: Signal,
+    {
+        match cutoff_freq {
+            f if f >= 1.0 => {
+                // When cutoff is 1, the z-transform is 1.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f if f <= 0.0 => {
+                // When cutoff is zero, nothing gets through the filter, so set
+                // coefficients up correctly.
+                BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                // Compute biquad coefficients for lowpass filter
+                let resonance = if resonance < 0.0 { 0.0 } else { resonance }; // can't go negative
+                let g: f64 = 10.0_f64.powf(0.05 * resonance);
+                let d: f64 = ((4.0 - (16.0 - 16.0 / (g * g)).sqrt()) / 2.0).sqrt();
+
+                let theta: f64 = M_PI * cutoff_freq;
+                let sn: f64 = 0.5 * d * std::num::sin(theta);
+                let beta: f64 = 0.5 * (1.0 - sn) / (1.0 + sn);
+                let gamma: f64 = (0.5 + beta) * cos(theta);
+                let alpha: f64 = 0.25 * (0.5 + beta - gamma);
+
+                let b0: f64 = 2.0 * alpha;
+                let b1: f64 = 2.0 * 2.0 * alpha;
+                let b2: f64 = 2.0 * alpha;
+                let a1: f64 = 2.0 * -gamma;
+                let a2: f64 = 2.0 * beta;
+                BiQuad::new(self, b0, b1, b2, 1.0, a1, a2)
+            }
+        }
+    }
 }
 
 impl<S: Signal> DspProcessable for S {}
