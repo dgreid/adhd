@@ -498,6 +498,40 @@ pub trait DspProcessable {
             }
         }
     }
+
+    /// Passes the signal through a all pass filter.
+    fn all_pass(self, freq: f64, q: f64) -> BiQuad<Self>
+    where
+        Self: Sized + Signal,
+        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
+            sample::conv::FromSample<f64>,
+    {
+        match freq {
+            _f if _f <= 0.0 || _f >= 1.0 => {
+                // When the frequency is zero or one, the signal in unaffected.
+                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            }
+            f => {
+                if q <= 0.0 {
+                    // When Q = 0, the above formulas have problems. If we look at the z-transform,
+                    // we can see that the limit as Q->0 is -1, so set the filter that way.
+                    return BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+                }
+                let w0 = std::f64::consts::PI * f;
+                let alpha = w0.sin() / (2.0 * q);
+                let k = w0.cos();
+
+                let b0 = 1.0 - alpha;
+                let b1 = -2.0 * k;
+                let b2 = 1.0 + alpha;
+                let a0 = 1.0 + alpha;
+                let a1 = -2.0 * k;
+                let a2 = 1.0 - alpha;
+
+                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+            }
+        }
+    }
 }
 
 impl<S: Signal> DspProcessable for S {}
