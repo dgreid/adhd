@@ -127,11 +127,11 @@ where
     S: Signal,
 {
     signal: S,
-    b0: <S::Frame as Frame>::Sample,
-    b1: <S::Frame as Frame>::Sample,
-    b2: <S::Frame as Frame>::Sample,
-    neg_a1: <S::Frame as Frame>::Sample,
-    neg_a2: <S::Frame as Frame>::Sample,
+    b0: S::Frame,
+    b1: S::Frame,
+    b2: S::Frame,
+    inv_a1: S::Frame,
+    inv_a2: S::Frame,
     x1: S::Frame,
     x2: S::Frame,
     y1: S::Frame,
@@ -143,15 +143,22 @@ where
     S: Signal,
     <S::Frame as Frame>::Sample: FromSample<f64>,
 {
-    pub fn new(signal: S, b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> Self {
-        let a0_inv: f64 = 1.0 / a0;
+    pub fn new(
+        signal: S,
+        b0: S::Frame,
+        b1: S::Frame,
+        b2: S::Frame,
+        a0: S::Frame,
+        a1: S::Frame,
+        a2: S::Frame,
+    ) -> Self {
         Self {
             signal,
-            b0: (b0 * a0_inv).to_sample(),
-            b1: (b1 * a0_inv).to_sample(),
-            b2: (b2 * a0_inv).to_sample(),
-            neg_a1: (a1 * a0_inv * -1.0).to_sample(),
-            neg_a2: (a2 * a0_inv * -1.0).to_sample(),
+            b0: b0.div_amp(a0.to_float_frame()),
+            b1: b1.mul_amp(a0.to_float_frame()),
+            b2: b2.div_amp(a0.to_float_frame()),
+            inv_a1: a1.div_amp(a0.to_float_frame()),
+            inv_a2: a2.div_amp(a0.to_float_frame()),
             x1: S::Frame::equilibrium(),
             x2: S::Frame::equilibrium(),
             y1: S::Frame::equilibrium(),
@@ -171,29 +178,17 @@ where
         // The transfer function H(z) is:
         // (b0 + b1 * z^(-1) + b2 * z^(-2)) / (1 + a1 * z^(-1) + a2 * z^(-2)).
 
-        let x1_b1 = self
-            .x1
-            .scale_amp(self.b1.to_float_sample())
-            .to_signed_frame();
-        let x2_b2 = self
-            .x2
-            .scale_amp(self.b2.to_float_sample())
-            .to_signed_frame();
-        let y1_neg_a1 = self
-            .y1
-            .scale_amp(self.neg_a1.to_float_sample())
-            .to_signed_frame();
-        let y2_neg_a2 = self
-            .y2
-            .scale_amp(self.neg_a2.to_float_sample())
-            .to_signed_frame();
+        let x1_b1 = self.x1.mul_amp(self.b1.to_float_frame());
+        let x2_b2 = self.x2.mul_amp(self.b2.to_float_frame());
+        let y1_a1 = self.y1.mul_amp(self.inv_a1.to_float_frame());
+        let y2_a2 = self.y2.mul_amp(self.inv_a2.to_float_frame());
         self.signal
             .next()
-            .scale_amp(self.b0.to_float_sample())
-            .add_amp(x1_b1)
-            .add_amp(x2_b2)
-            .add_amp(y1_neg_a1)
-            .add_amp(y2_neg_a2)
+            .mul_amp(self.b0.to_float_frame())
+            .add_amp(x1_b1.to_signed_frame())
+            .add_amp(x2_b2.to_signed_frame())
+            .sub_amp(y1_a1.to_signed_frame())
+            .sub_amp(y2_a2.to_signed_frame())
     }
 
     #[inline]
@@ -225,14 +220,21 @@ pub trait DspProcessable {
         }
     }
 
-    fn biquad<S>(self, b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> BiQuad<Self>
+    fn biquad(self, b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
         <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
             sample::conv::FromSample<f64>,
-        S: Signal,
     {
-        BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+        BiQuad::new(
+            self,
+            Self::Frame::from_samples(&mut std::iter::repeat(b0.to_sample())).unwrap(),
+            Self::Frame::from_samples(&mut std::iter::repeat(b1.to_sample())).unwrap(),
+            Self::Frame::from_samples(&mut std::iter::repeat(b2.to_sample())).unwrap(),
+            Self::Frame::from_samples(&mut std::iter::repeat(a0.to_sample())).unwrap(),
+            Self::Frame::from_samples(&mut std::iter::repeat(a1.to_sample())).unwrap(),
+            Self::Frame::from_samples(&mut std::iter::repeat(a2.to_sample())).unwrap(),
+        )
     }
 
     /// Passes the signal through lowpass filter. The frequency must be between 0.0 and 1.0.
@@ -245,12 +247,12 @@ pub trait DspProcessable {
         match cutoff_freq {
             _f if _f >= 1.0 => {
                 // When cutoff is 1, the z-transform is 1.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             _f if _f <= 0.0 => {
                 // When cutoff is zero, nothing gets through the filter, so set
                 // coefficients up correctly.
-                BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 // Compute biquad coefficients for lowpass filter
@@ -269,7 +271,7 @@ pub trait DspProcessable {
                 let b2: f64 = 2.0 * alpha;
                 let a1: f64 = 2.0 * -gamma;
                 let a2: f64 = 2.0 * beta;
-                BiQuad::new(self, b0, b1, b2, 1.0, a1, a2)
+                self.biquad(b0, b1, b2, 1.0, a1, a2)
             }
         }
     }
@@ -285,11 +287,11 @@ pub trait DspProcessable {
             _f if _f >= 1.0 => {
                 // When cutoff is one, nothing gets through the filter, so set
                 // coefficients up correctly.
-                BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             _f if _f <= 0.0 => {
                 // When cutoff is zero, the z-transform is 1.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 // Compute biquad coefficients for highpass filter
@@ -308,7 +310,7 @@ pub trait DspProcessable {
                 let b2: f64 = 2.0 * alpha;
                 let a1: f64 = 2.0 * -gamma;
                 let a2: f64 = 2.0 * beta;
-                BiQuad::new(self, b0, b1, b2, 1.0, a1, a2)
+                self.biquad(b0, b1, b2, 1.0, a1, a2)
             }
         }
     }
@@ -323,7 +325,7 @@ pub trait DspProcessable {
         if q <= 0.0 {
             // When Q = 0, the formulas have problems. If we look at the z-transform, we can
             // see that the limit as Q->0 is 1, so set the filter that way.
-            return BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+            return self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
         }
 
         match freq {
@@ -339,14 +341,14 @@ pub trait DspProcessable {
                 let a1 = -2.0 * k;
                 let a2 = 1.0 - alpha;
 
-                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+                self.biquad(b0, b1, b2, a0, a1, a2)
             }
             _ => {
                 // When the cutoff is zero, the z-transform approaches 0, if Q > 0. When both Q and
                 // cutoff are zero, the z-transform is pretty much undefined. What should we do in
                 // this case?  For now, just make the filter 0. When the cutoff is 1, the
                 // z-transform also approaches 0.
-                BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
         }
     }
@@ -363,11 +365,11 @@ pub trait DspProcessable {
         match freq {
             _f if _f >= 1.0 => {
                 // Passes through applying a constant gain.
-                BiQuad::new(self, a * a, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(a * a, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             _f if _f <= 0.0 => {
                 // The signal in unaffected it the shelf is at zero.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 let w0 = std::f64::consts::PI * f;
@@ -385,7 +387,7 @@ pub trait DspProcessable {
                 let a1 = -2.0 * (a_minus_one + a_plus_one * k);
                 let a2 = a_plus_one + a_minus_one * k - k2;
 
-                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+                self.biquad(b0, b1, b2, a0, a1, a2)
             }
         }
     }
@@ -402,11 +404,11 @@ pub trait DspProcessable {
         match freq {
             _f if _f >= 1.0 => {
                 // The signal in unaffected it the shelf is past the highest frequency.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             _f if _f <= 0.0 => {
                 // Passes through applying a constant gain (all shelf).
-                BiQuad::new(self, a * a, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(a * a, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 let w0 = std::f64::consts::PI * f;
@@ -424,7 +426,7 @@ pub trait DspProcessable {
                 let a1 = -2.0 * (a_minus_one - a_plus_one * k);
                 let a2 = a_plus_one - a_minus_one * k - k2;
 
-                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+                self.biquad(b0, b1, b2, a0, a1, a2)
             }
         }
     }
@@ -441,13 +443,13 @@ pub trait DspProcessable {
         match freq {
             _f if _f <= 0.0 || _f >= 1.0 => {
                 // When the frequency is zero or one, the signal in unaffected.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 if q <= 0.0 {
                     // When Q = 0, the above formulas have problems. If we look at the z-transform, we can
                     // see that the limit as Q->0 is A^2, so set the filter that way.
-                    return BiQuad::new(self, a * a, 0.0, 0.0, 1.0, 0.0, 0.0);
+                    return self.biquad(a * a, 0.0, 0.0, 1.0, 0.0, 0.0);
                 }
                 let w0 = std::f64::consts::PI * f;
                 let alpha = w0.sin() / (2.0 * q);
@@ -460,7 +462,7 @@ pub trait DspProcessable {
                 let a1 = -2.0 * k;
                 let a2 = 1.0 - alpha / a;
 
-                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+                self.biquad(b0, b1, b2, a0, a1, a2)
             }
         }
     }
@@ -475,13 +477,13 @@ pub trait DspProcessable {
         match freq {
             _f if _f <= 0.0 || _f >= 1.0 => {
                 // When the frequency is zero or one, the signal in unaffected.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 if q <= 0.0 {
                     // When Q = 0, the above formulas have problems. If we look at the z-transform,
                     // we can see that the limit as Q->0 is 0, so set the filter that way.
-                    return BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+                    return self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
                 }
                 let w0 = std::f64::consts::PI * f;
                 let alpha = w0.sin() / (2.0 * q);
@@ -494,7 +496,7 @@ pub trait DspProcessable {
                 let a1 = -2.0 * k;
                 let a2 = 1.0 - alpha;
 
-                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+                self.biquad(b0, b1, b2, a0, a1, a2)
             }
         }
     }
@@ -509,13 +511,13 @@ pub trait DspProcessable {
         match freq {
             _f if _f <= 0.0 || _f >= 1.0 => {
                 // When the frequency is zero or one, the signal in unaffected.
-                BiQuad::new(self, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 if q <= 0.0 {
                     // When Q = 0, the above formulas have problems. If we look at the z-transform,
                     // we can see that the limit as Q->0 is -1, so set the filter that way.
-                    return BiQuad::new(self, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+                    return self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
                 }
                 let w0 = std::f64::consts::PI * f;
                 let alpha = w0.sin() / (2.0 * q);
@@ -528,7 +530,7 @@ pub trait DspProcessable {
                 let a1 = -2.0 * k;
                 let a2 = 1.0 - alpha;
 
-                BiQuad::new(self, b0, b1, b2, a0, a1, a2)
+                self.biquad(b0, b1, b2, a0, a1, a2)
             }
         }
     }
