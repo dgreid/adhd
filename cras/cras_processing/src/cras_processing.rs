@@ -226,6 +226,8 @@ pub trait DspProcessable {
         <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
             sample::conv::FromSample<f64>,
     {
+        // The following `unwrap` calls cannot fail because `from_samples` only returns `None` when
+        // insufficient samples are provided, `repeat` provides infinite samples.
         BiQuad::new(
             self,
             Self::Frame::from_samples(&mut std::iter::repeat(b0.to_sample())).unwrap(),
