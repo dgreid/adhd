@@ -240,29 +240,31 @@ pub trait DspProcessable {
     }
 
     /// Passes the signal through lowpass filter. The frequency must be between 0.0 and 1.0.
-    fn low_pass(self, cutoff_freq: f64, resonance: f64) -> BiQuad<Self>
+    fn low_pass<F>(self, cutoff_freq: F, resonance: F) -> BiQuad<Self>
     where
         Self: Sized + Signal,
         <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
             sample::conv::FromSample<f64>,
+        F: Frame<Sample = f64, NumChannels = <<Self as Signal>::Frame as Frame>::NumChannels>,
     {
-        match cutoff_freq {
-            _f if _f >= 1.0 => {
+        match cutoff_freq.channel(0).unwrap() {
+            _f if _f >= &1.0 => {
                 // When cutoff is 1, the z-transform is 1.
                 self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
-            _f if _f <= 0.0 => {
+            _f if _f <= &0.0 => {
                 // When cutoff is zero, nothing gets through the filter, so set
                 // coefficients up correctly.
                 self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             }
             f => {
                 // Compute biquad coefficients for lowpass filter
+                let resonance = *resonance.channel(0).unwrap();
                 let resonance = if resonance < 0.0 { 0.0 } else { resonance }; // can't go negative
                 let g: f64 = 10.0_f64.powf(0.05 * resonance);
                 let d: f64 = ((4.0 - (16.0 - 16.0 / (g * g)).sqrt()) / 2.0).sqrt();
 
-                let theta: f64 = std::f64::consts::PI * f;
+                let theta: f64 = std::f64::consts::PI * *f;
                 let sn: f64 = 0.5 * d * theta.sin();
                 let beta: f64 = 0.5 * (1.0 - sn) / (1.0 + sn);
                 let gamma: f64 = (0.5 + beta) * theta.cos();
