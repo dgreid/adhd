@@ -247,37 +247,58 @@ pub trait DspProcessable {
             sample::conv::FromSample<f64>,
         F: Frame<Sample = f64, NumChannels = <<Self as Signal>::Frame as Frame>::NumChannels>,
     {
-        match cutoff_freq.channel(0).unwrap() {
-            _f if _f >= &1.0 => {
-                // When cutoff is 1, the z-transform is 1.
-                self.biquad(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-            }
-            _f if _f <= &0.0 => {
-                // When cutoff is zero, nothing gets through the filter, so set
-                // coefficients up correctly.
-                self.biquad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-            }
-            f => {
-                // Compute biquad coefficients for lowpass filter
-                let resonance = *resonance.channel(0).unwrap();
-                let resonance = if resonance < 0.0 { 0.0 } else { resonance }; // can't go negative
-                let g: f64 = 10.0_f64.powf(0.05 * resonance);
-                let d: f64 = ((4.0 - (16.0 - 16.0 / (g * g)).sqrt()) / 2.0).sqrt();
+        fn lowpass_params(cutoff: f64, resonance: f64) -> (f64, f64, f64) {
+            // Compute biquad coefficients for lowpass filter
+            let resonance = if resonance < 0.0 { 0.0 } else { resonance }; // can't go negative
+            let g: f64 = 10.0_f64.powf(0.05 * resonance);
+            let d: f64 = ((4.0 - (16.0 - 16.0 / (g * g)).sqrt()) / 2.0).sqrt();
 
-                let theta: f64 = std::f64::consts::PI * *f;
-                let sn: f64 = 0.5 * d * theta.sin();
-                let beta: f64 = 0.5 * (1.0 - sn) / (1.0 + sn);
-                let gamma: f64 = (0.5 + beta) * theta.cos();
-                let alpha: f64 = 0.25 * (0.5 + beta - gamma);
-
-                let b0: f64 = 2.0 * alpha;
-                let b1: f64 = 2.0 * 2.0 * alpha;
-                let b2: f64 = 2.0 * alpha;
-                let a1: f64 = 2.0 * -gamma;
-                let a2: f64 = 2.0 * beta;
-                self.biquad(b0, b1, b2, 1.0, a1, a2)
-            }
+            let theta: f64 = std::f64::consts::PI * cutoff;
+            let sn: f64 = 0.5 * d * theta.sin();
+            let beta: f64 = 0.5 * (1.0 - sn) / (1.0 + sn);
+            let gamma: f64 = (0.5 + beta) * theta.cos();
+            let alpha: f64 = 0.25 * (0.5 + beta - gamma);
+            (alpha, beta, gamma)
         }
+
+        let mut b0 = Self::Frame::equilibrium();
+        let mut b1 = Self::Frame::equilibrium();
+        let mut b2 = Self::Frame::equilibrium();
+        let mut a0 = Self::Frame::equilibrium();
+        let mut a1 = Self::Frame::equilibrium();
+        let mut a2 = Self::Frame::equilibrium();
+        for (i, (c, r)) in cutoff_freq.channels().zip(resonance.channels()).enumerate() {
+            let coeffs = match c {
+                _f if _f >= 1.0 => {
+                    // When cutoff is 1, the z-transform is 1.
+                    (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                }
+                _f if _f <= 0.0 => {
+                    // When cutoff is zero, nothing gets through the filter, so set
+                    // coefficients up correctly.
+                    (0.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                }
+                f => {
+                    let (alpha, beta, gamma) = lowpass_params(f, r);
+                    (
+                        2.0 * alpha,       // b0
+                        2.0 * 2.0 * alpha, // b1
+                        2.0 * alpha,       // b2
+                        1.0,               // a0
+                        2.0 * -gamma,      // a1
+                        2.0 * beta,        // a2
+                    )
+                }
+            };
+            b0.set_channel(i, coeffs.0.to_sample());
+            b1.set_channel(i, coeffs.1.to_sample());
+            b2.set_channel(i, coeffs.2.to_sample());
+            a0.set_channel(i, coeffs.3.to_sample());
+            a1.set_channel(i, coeffs.4.to_sample());
+            a2.set_channel(i, coeffs.5.to_sample());
+        }
+
+        BiQuad::new(self, b0, b1, b2, a0, a1, a2)
     }
 
     /// Passes the signal through highpass filter. The frequency must be between 0.0 and 1.0.
