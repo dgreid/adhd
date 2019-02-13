@@ -27,14 +27,17 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
     let in_file = OpenOptions::new().read(true).open(input)?;
     let num_frames = in_file.metadata()?.len() / 4;
     let mut in_file = BufReader::new(in_file);
-    let mut frames_in = vec![[0.0f32; 2]; num_frames as usize];
-    for frame_in in frames_in.iter_mut() {
-        let mut buf = [0u8; 4];
+    let mut left_in = vec![[0.0f32; 1]; num_frames as usize];
+    let mut right_in = vec![[0.0f32; 1]; num_frames as usize];
+    for left in left_in.iter_mut() {
+        let mut buf = [0u8; 2];
         in_file.read_exact(&mut buf)?;
-        *frame_in = [
-            i16::from_le_bytes([buf[0], buf[1]]).to_sample::<f32>(),
-            i16::from_le_bytes([buf[2], buf[3]]).to_sample::<f32>(),
-        ];
+        *left = [i16::from_le_bytes([buf[0], buf[1]]).to_sample::<f32>()];
+    }
+    for right in right_in.iter_mut() {
+        let mut buf = [0u8; 2];
+        in_file.read_exact(&mut buf)?;
+        *right = [i16::from_le_bytes([buf[0], buf[1]]).to_sample::<f32>()];
     }
 
     let mut frames_out = vec![[0i16; 2]; num_frames as usize];
@@ -42,18 +45,14 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
     const NQ: f64 = 48000.0 / 2.0;
 
     let start_time = Instant::now();
-    let signal = signal::from_iter(frames_in.into_iter());
-    let left = signal
-        .clone()
-        .map(|f| [*f.channel(0).unwrap(); 1])
+    let left = signal::from_iter(left_in.into_iter())
         .peaking(380.0 / NQ, 3.0, -10.0)
         .peaking(720.0 / NQ, 3.0, -12.0)
         .peaking(1705.0 / NQ, 3.0, -8.0)
         .high_pass(218.0 / NQ, 0.7)
         .peaking(580.0 / NQ, 6.0, -8.0)
         .high_shelf(8000.0 / NQ, -2.0);
-    let right = signal
-        .map(|f| [*f.channel(1).unwrap(); 1])
+    let right = signal::from_iter(right_in.into_iter())
         .peaking(450.0 / NQ, 3.0, -12.0)
         .peaking(721.0 / NQ, 3.0, -12.0)
         .peaking(1800.0 / NQ, 8.0, -10.2)
@@ -81,7 +80,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         // It's fine. The slice is dropped right away, frames_out will certainly out live it.
         let out_buf: &[u8] = std::slice::from_raw_parts(
             frames_out.as_ptr() as *const u8,
-            frames_out.len() * std::mem::size_of::<i16>(),
+            frames_out.len() * std::mem::size_of::<i16>() * 2,
         );
         out_file.write(&out_buf)?;
     }
