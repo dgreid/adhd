@@ -54,6 +54,7 @@ where
 }
 
 /// An `Iterator` that blocks any dc offset present in the signal.
+#[derive(Clone)]
 pub struct DCFiltered<S>
 where
     S: Signal,
@@ -92,6 +93,7 @@ where
 }
 
 /// An 'Iterator' that mutes the samples from its signal.
+#[derive(Clone)]
 pub struct Muted<S>
 where
     S: Signal,
@@ -122,6 +124,7 @@ where
 ///
 /// We use f64 during the coefficients calculation for better accurary, but
 /// f32 is used during the actual filtering for faster computation.
+#[derive(Clone)]
 pub struct BiQuad<S>
 where
     S: Signal,

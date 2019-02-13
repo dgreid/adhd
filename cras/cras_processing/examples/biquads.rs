@@ -42,14 +42,28 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
     const NQ: f64 = 48000.0 / 2.0;
 
     let start_time = Instant::now();
-    let out_signal = signal::from_iter(frames_in.into_iter())
+    let signal = signal::from_iter(frames_in.into_iter());
+    let left = signal
+        .clone()
+        .map(|f| f.channel_frame(0).unwrap())
         .peaking(380.0 / NQ, 3.0, -10.0)
         .peaking(720.0 / NQ, 3.0, -12.0)
         .peaking(1705.0 / NQ, 3.0, -8.0)
         .high_pass(218.0 / NQ, 0.7)
         .peaking(580.0 / NQ, 6.0, -8.0)
-        .high_shelf(8000.0 / NQ, -2.0)
-        .map(|f| f.map(|s| s.to_sample::<i16>()));
+        .high_shelf(8000.0 / NQ, -2.0);
+    let right = signal
+        .map(|f| f.channel_frame(1).unwrap())
+        .peaking(450.0 / NQ, 3.0, -12.0)
+        .peaking(721.0 / NQ, 3.0, -12.0)
+        .peaking(1800.0 / NQ, 8.0, -10.2)
+        .peaking(580.0 / NQ, 6.0, -8.0)
+        .high_pass(250.0 / NQ, 0.6578)
+        .high_shelf(8000.0 / NQ, -2.0);
+
+    let out_signal = left
+        .combine_channels(right)
+        .map(|f: [f32; 2]| f.map(|s| s.to_sample::<i16>()));
     for (frame_out, signal_frame) in frames_out.iter_mut().zip(out_signal.until_exhausted()) {
         *frame_out = signal_frame;
     }
