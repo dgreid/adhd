@@ -41,7 +41,7 @@ static void test_file(const char *input_filename, const char *output_filename)
 {
 	size_t frames;
 	int i;
-	double NQ = 44100 / 2; /* nyquist frequency */
+	double NQ = 48000 / 2; /* nyquist frequency */
 	struct timespec tp1, tp2;
 	struct eq2 *eq2;
 

@@ -45,7 +45,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
     let signal = signal::from_iter(frames_in.into_iter());
     let left = signal
         .clone()
-        .map(|f| f.channel_frame(0).unwrap())
+        .map(|f| [*f.channel(0).unwrap(); 1])
         .peaking(380.0 / NQ, 3.0, -10.0)
         .peaking(720.0 / NQ, 3.0, -12.0)
         .peaking(1705.0 / NQ, 3.0, -8.0)
@@ -53,7 +53,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         .peaking(580.0 / NQ, 6.0, -8.0)
         .high_shelf(8000.0 / NQ, -2.0);
     let right = signal
-        .map(|f| f.channel_frame(1).unwrap())
+        .map(|f| [*f.channel(1).unwrap(); 1])
         .peaking(450.0 / NQ, 3.0, -12.0)
         .peaking(721.0 / NQ, 3.0, -12.0)
         .peaking(1800.0 / NQ, 8.0, -10.2)
@@ -62,7 +62,7 @@ fn main() -> std::result::Result<(), Box<std::error::Error>> {
         .high_shelf(8000.0 / NQ, -2.0);
 
     let out_signal = left
-        .combine_channels(right)
+        .zip_map(right, |l, r| [l[0], r[0]])
         .map(|f: [f32; 2]| f.map(|s| s.to_sample::<i16>()));
     for (frame_out, signal_frame) in frames_out.iter_mut().zip(out_signal.until_exhausted()) {
         *frame_out = signal_frame;
