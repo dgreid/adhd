@@ -13,6 +13,13 @@ use cras_processing::DspProcessable;
 /// Reads samples from the input, passes them through the biquads and writes to the
 /// output specified in argument 2.
 fn main() -> std::result::Result<(), Box<std::error::Error>> {
+    // flush denormals to zero.
+    unsafe {
+        let mxcsr = std::arch::x86_64::_mm_getcsr() | 0x8040;
+
+        std::arch::x86_64::_mm_setcsr(mxcsr);
+    }
+
     let args: Vec<String> = std::env::args().collect();
 
     let input = args.get(1).unwrap_or_else(|| {
