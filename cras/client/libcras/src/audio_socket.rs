@@ -8,6 +8,7 @@ use std::os::unix::{
     io::{AsRawFd, RawFd},
     net::UnixStream,
 };
+use std::time::Duration;
 
 use cras_sys::gen::{audio_message, CRAS_AUDIO_MESSAGE_ID};
 use data_model::DataInit;
@@ -84,6 +85,37 @@ impl AudioSocket {
         } else {
             Err(io::Error::new(io::ErrorKind::Other, "Read truncated data."))
         }
+    }
+
+    // check if there is a readable message.
+    // TODO - reduce duplicaiton with `read_audio_message`.
+    fn is_msg_ready(&self) -> io::Result<bool> {
+        #[derive(PollToken)]
+        enum Token {
+            AudioMsg,
+        }
+        let poll_ctx: PollContext<Token> =
+            match PollContext::new().and_then(|pc| pc.add(self, Token::AudioMsg).and(Ok(pc))) {
+                Ok(pc) => pc,
+                Err(e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to create PollContext: {}", e),
+                    ));
+                }
+            };
+        let events = {
+            match poll_ctx.wait_timeout(Duration::new(0, 0)) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to poll: {:?}", e),
+                    ));
+                }
+            }
+        };
+        return Ok(!events.is_empty());
     }
 
     /// Blocks reading an `audio message`.
