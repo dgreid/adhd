@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use cras_sys::gen::{audio_message, CRAS_AUDIO_MESSAGE_ID};
 use data_model::DataInit;
-use sys_util::{PollContext, PollToken};
+use mio::unix::EventedFd;
+use mio::Poll as MioPoll;
 
 /// A structure for interacting with the CRAS server audio thread through a `UnixStream::pair`.
 pub struct AudioSocket {
@@ -90,32 +91,34 @@ impl AudioSocket {
     // check if there is a readable message.
     // TODO - reduce duplicaiton with `read_audio_message`.
     fn is_msg_ready(&self) -> io::Result<bool> {
-        #[derive(PollToken)]
-        enum Token {
-            AudioMsg,
-        }
-        let poll_ctx: PollContext<Token> =
-            match PollContext::new().and_then(|pc| pc.add(self, Token::AudioMsg).and(Ok(pc))) {
-                Ok(pc) => pc,
-                Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed to create PollContext: {}", e),
-                    ));
-                }
-            };
-        let events = {
-            match poll_ctx.wait_timeout(Duration::new(0, 0)) {
-                Ok(v) => v,
-                Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed to poll: {:?}", e),
-                    ));
-                }
+        let mut events = mio::Events::with_capacity(1);
+        let mio_poll = match MioPoll::new().and_then(|poll| {
+            poll.register(
+                &EventedFd(&self.socket.as_raw_fd()),
+                mio::Token(0),
+                mio::Ready::readable(),
+                mio::PollOpt::edge(),
+            )
+            .and(Ok(poll))
+        }) {
+            Ok(poll) => poll,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to create mio::Poll: {}", e),
+                ));
             }
         };
-        return Ok(!events.is_empty());
+        let nevents = match mio_poll.poll(&mut events, Some(Duration::new(0, 0))) {
+            Ok(n) => n,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to poll: {:?}", e),
+                ));
+            }
+        };
+        Ok(nevents > 0)
     }
 
     /// Blocks reading an `audio message`.
@@ -126,41 +129,43 @@ impl AudioSocket {
     /// # Errors
     /// Returns io::Error if error occurs.
     pub fn read_audio_message(&mut self) -> io::Result<AudioMessage> {
-        #[derive(PollToken)]
-        enum Token {
-            AudioMsg,
-        }
-        let poll_ctx: PollContext<Token> =
-            match PollContext::new().and_then(|pc| pc.add(self, Token::AudioMsg).and(Ok(pc))) {
-                Ok(pc) => pc,
-                Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed to create PollContext: {}", e),
-                    ));
-                }
-            };
-        let events = {
-            match poll_ctx.wait() {
-                Ok(v) => v,
-                Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed to poll: {:?}", e),
-                    ));
-                }
+        let mut events = mio::Events::with_capacity(128);
+        let mio_poll = match MioPoll::new().and_then(|poll| {
+            poll.register(
+                &EventedFd(&self.socket.as_raw_fd()),
+                mio::Token(0),
+                mio::Ready::readable(),
+                mio::PollOpt::edge(),
+            )
+            .and(Ok(poll))
+        }) {
+            Ok(poll) => poll,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to create mio::Poll: {}", e),
+                ));
+            }
+        };
+        let nevents = match mio_poll.poll(&mut events, None) {
+            Ok(n) => n,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to poll: {:?}", e),
+                ));
             }
         };
 
         // Check the first readable message
-        let tokens: Vec<Token> = events.iter_readable().map(|e| e.token()).collect();
-        match tokens.get(0) {
-            None => Err(io::Error::new(io::ErrorKind::Other, "Unexpected exit")),
-            Some(&Token::AudioMsg) => {
-                let raw_msg: audio_message = self.read_from_socket()?;
-                Ok(AudioMessage::from(raw_msg))
+        for e in &events {
+            if !e.readiness().is_readable() {
+                continue;
             }
+            let raw_msg: audio_message = self.read_from_socket()?;
+            return Ok(AudioMessage::from(raw_msg));
         }
+        return Err(io::Error::new(io::ErrorKind::Other, "Unexpected exit"));
     }
 
     /// Sends raw audio message with given AudioMessage enum.
