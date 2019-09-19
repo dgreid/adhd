@@ -5,7 +5,7 @@ pub enum Error {
     InvalidAudioFormat(u16),
     InvalidChunkId,
     InvalidFormat,
-    InvalidPcmFormatChunkSize,
+    InvalidPcmFormatChunkSize(u32),
     InvalidSubChunkId,
     ReadingChunkDescriptor(std::io::Error),
     ReadingFormatChunk(std::io::Error),
@@ -42,14 +42,14 @@ impl WavFile {
         // Read the format subchunk that describes a WAVE file.
         let subchunk_id = read_be_u32(&mut inner).map_err(Error::ReadingFormatChunk)?;
         if subchunk_id != FMT_ID {
-            return Err(Error::InvalidSubchunkId);
+            return Err(Error::InvalidSubChunkId);
         }
         let subchunk_size = read_le_u32(&mut inner).map_err(Error::ReadingFormatChunk)?;
         if subchunk_size != 16 {
-            return Err(Error::InvalidPcmFormatChunkSize));
+            return Err(Error::InvalidPcmFormatChunkSize(subchunk_size));
         }
 
-        let audio_format =read_le_u16(&mut inner).map_err(Error::ReadingFormatChunk)?;
+        let audio_format = read_le_u16(&mut inner).map_err(Error::ReadingFormatChunk)?;
         if audio_format != PCM_FMT {
             return Err(Error::InvalidAudioFormat(audio_format));
         }
@@ -70,7 +70,7 @@ fn read_le_u32(f: &mut File) -> std::io::Result<u32> {
     Ok(u32::from_le_bytes(buf))
 }
 
-fn read_le_u16(f: &mut File) -> std::io::Result<u32> {
+fn read_le_u16(f: &mut File) -> std::io::Result<u16> {
     let mut buf = [0u8; 2];
     f.read(&mut buf[..])?;
     Ok(u16::from_le_bytes(buf))
