@@ -8,6 +8,7 @@ pub enum Error {
     InvalidPcmFormatChunkSize(u32),
     InvalidSubChunkId,
     ReadingChunkDescriptor(std::io::Error),
+    ReadingDataHeader(std::io::Error),
     ReadingFormatChunk(std::io::Error),
     SeekingFile(std::io::Error),
 }
@@ -19,12 +20,23 @@ const FMT_ID: u32 = 0x666d7420; // "fmt " in ASCII,
 
 const PCM_FMT: u16 = 1;
 
-struct WavFile {
+struct AudioFormat {
+    audio_format: u16,
+    num_channels: u16,
+    sample_rate: u32,
+    byte_rate: u32,
+    block_align: u16,
+    bits_per_sample: u16,
+}
+
+pub struct WavFile {
     inner: File,
+    format: AudioFormat,
 }
 
 impl WavFile {
     /// Creates a `WavFile` from the given raw `File`.
+    /// A WAVE file that doesn't container PCM data will result in an error.
     pub fn from_raw(mut inner: File) -> Result<WavFile> {
         inner.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
 
@@ -54,7 +66,28 @@ impl WavFile {
             return Err(Error::InvalidAudioFormat(audio_format));
         }
 
-        Ok(WavFile { inner })
+        let num_channels = read_le_u16(&mut inner).map_err(Error::ReadingFormatChunk)?;
+        let sample_rate = read_le_u32(&mut inner).map_err(Error::ReadingFormatChunk)?;
+        let byte_rate = read_le_u32(&mut inner).map_err(Error::ReadingFormatChunk)?;
+        let block_align = read_le_u16(&mut inner).map_err(Error::ReadingFormatChunk)?;
+        let bits_per_sample = read_le_u16(&mut inner).map_err(Error::ReadingFormatChunk)?;
+
+        // Read the data section header
+
+        let data_section_id = read_be_u32(&mut inner).map_err(Error::ReadingDataHeader)?;
+        let data_section_size = read_le_u32(&mut inner).map_err(Error::ReadingDataHeader)?;
+
+        Ok(WavFile {
+            inner,
+            format: AudioFormat {
+                audio_format,
+                num_channels,
+                sample_rate,
+                byte_rate,
+                block_align,
+                bits_per_sample,
+            },
+        })
     }
 }
 
