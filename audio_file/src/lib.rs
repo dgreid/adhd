@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
 pub enum Error {
@@ -11,12 +10,14 @@ pub enum Error {
     ReadingDataHeader(std::io::Error),
     ReadingFormatChunk(std::io::Error),
     SeekingFile(std::io::Error),
+    SubsectionId(u32),
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-const RIFF_ID: u32 = 0x52494646; // "RIFF" in ASCII,
-const WAVE_ID: u32 = 0x57415645; // "WAVE" in ASCII,
-const FMT_ID: u32 = 0x666d7420; // "fmt " in ASCII,
+const RIFF_ID: u32 = 0x5249_4646; // "RIFF" in ASCII,
+const WAVE_ID: u32 = 0x5741_5645; // "WAVE" in ASCII,
+const FMT_ID: u32 = 0x666d_7420; // "fmt " in ASCII,
+const DATA_ID: u32 = 0x6461_7461; // "data" in ASCII,
 
 const PCM_FMT: u16 = 1;
 
@@ -29,15 +30,22 @@ struct AudioFormat {
     bits_per_sample: u16,
 }
 
-pub struct WavFile {
-    inner: File,
+pub struct WavFile<F>
+where
+    F: Read + Seek,
+{
+    inner: F,
+    data_section_size: usize,
     format: AudioFormat,
 }
 
-impl WavFile {
+impl<F> WavFile<F>
+where
+    F: Read + Seek,
+{
     /// Creates a `WavFile` from the given raw `File`.
     /// A WAVE file that doesn't container PCM data will result in an error.
-    pub fn from_raw(mut inner: File) -> Result<WavFile> {
+    pub fn from_raw(mut inner: F) -> Result<WavFile<F>> {
         inner.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
 
         // Read the main chunk.
@@ -45,7 +53,7 @@ impl WavFile {
         if chunk_id != RIFF_ID {
             return Err(Error::InvalidChunkId);
         }
-        let chunk_size = read_le_u32(&mut inner).map_err(Error::ReadingChunkDescriptor)?;
+        let _chunk_size = read_le_u32(&mut inner).map_err(Error::ReadingChunkDescriptor)?;
         let riff_format = read_be_u32(&mut inner).map_err(Error::ReadingChunkDescriptor)?;
         if riff_format != WAVE_ID {
             return Err(Error::InvalidFormat);
@@ -75,10 +83,14 @@ impl WavFile {
         // Read the data section header
 
         let data_section_id = read_be_u32(&mut inner).map_err(Error::ReadingDataHeader)?;
-        let data_section_size = read_le_u32(&mut inner).map_err(Error::ReadingDataHeader)?;
+        let data_section_size = read_le_u32(&mut inner).map_err(Error::ReadingDataHeader)? as usize;
+        if data_section_id != DATA_ID {
+            return Err(Error::SubsectionId(data_section_id));
+        }
 
         Ok(WavFile {
             inner,
+            data_section_size,
             format: AudioFormat {
                 audio_format,
                 num_channels,
@@ -91,28 +103,50 @@ impl WavFile {
     }
 }
 
-fn read_be_u32(f: &mut File) -> std::io::Result<u32> {
+fn read_be_u32<F: Read>(f: &mut F) -> std::io::Result<u32> {
     let mut buf = [0u8; 4];
-    f.read(&mut buf[..])?;
+    f.read_exact(&mut buf[..])?;
     Ok(u32::from_be_bytes(buf))
 }
 
-fn read_le_u32(f: &mut File) -> std::io::Result<u32> {
+fn read_le_u32<F: Read>(f: &mut F) -> std::io::Result<u32> {
     let mut buf = [0u8; 4];
-    f.read(&mut buf[..])?;
+    f.read_exact(&mut buf[..])?;
     Ok(u32::from_le_bytes(buf))
 }
 
-fn read_le_u16(f: &mut File) -> std::io::Result<u16> {
+fn read_le_u16<F: Read>(f: &mut F) -> std::io::Result<u16> {
     let mut buf = [0u8; 2];
-    f.read(&mut buf[..])?;
+    f.read_exact(&mut buf[..])?;
     Ok(u16::from_le_bytes(buf))
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    const FILE_HEADER: [u8; 44] = [
+        0x52, 0x49, 0x46, 0x46, 0x04, 0x6c, 0x21, 0x02, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74,
+        0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x44, 0xac, 0x00, 0x00, 0x10, 0xb1,
+        0x02, 0x00, 0x04, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 0x70, 0x66, 0x21, 0x02,
+    ];
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn header_read() {
+        let header = Cursor::new(&FILE_HEADER[..]);
+        let wav_file = match WavFile::from_raw(header) {
+            Ok(w) => w,
+            Err(e) => panic!("Failed to create wav file"),
+        };
+        assert_eq!(wav_file.format.sample_rate, 44100);
+        assert_eq!(wav_file.format.num_channels, 2);
+        assert_eq!(wav_file.format.bits_per_sample, 16);
+        assert_eq!(wav_file.format.block_align, 4);
+        assert_eq!(wav_file.format.audio_format, 1);
+        assert_eq!(
+            wav_file.format.byte_rate,
+            wav_file.format.sample_rate * wav_file.format.num_channels as u32 * 2
+        );
     }
 }
