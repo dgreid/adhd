@@ -113,7 +113,12 @@ where
     pub fn bits_per_sample(&self) -> usize {
         self.format.bits_per_sample as usize
     }
+    // TODO impl close, drop - check if data written and if so rewrite the header.
 }
+
+// TODO impl read
+
+// TODO impl write
 
 fn read_be_u32<F: Read>(f: &mut F) -> std::io::Result<u32> {
     let mut buf = [0u8; 4];
