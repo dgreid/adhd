@@ -101,6 +101,18 @@ where
             },
         })
     }
+
+    /// Returns the number of comlete audio frames in the file. A frame is defined as one sample
+    /// from each channel. For example a file with 128 bytes of data would have 32 stereo frames of
+    /// 16 bit data ( 128 bytes/file / ( 2 bytes/sample * 2 samples/frame ) ) = 32 frames/file.
+    pub fn num_frames(&self) -> usize {
+        self.data_section_size as usize / self.format.block_align as usize
+    }
+
+    /// Returns the number of bits in each sample
+    pub fn bits_per_sample(&self) -> usize {
+        self.format.bits_per_sample as usize
+    }
 }
 
 fn read_be_u32<F: Read>(f: &mut F) -> std::io::Result<u32> {
@@ -129,7 +141,7 @@ mod tests {
     const FILE_HEADER: [u8; 44] = [
         0x52, 0x49, 0x46, 0x46, 0x04, 0x6c, 0x21, 0x02, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74,
         0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x44, 0xac, 0x00, 0x00, 0x10, 0xb1,
-        0x02, 0x00, 0x04, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 0x70, 0x66, 0x21, 0x02,
+        0x02, 0x00, 0x04, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 0x00, 0x01, 0x00, 0x00,
     ];
 
     #[test]
@@ -137,16 +149,21 @@ mod tests {
         let header = Cursor::new(&FILE_HEADER[..]);
         let wav_file = match WavFile::from_raw(header) {
             Ok(w) => w,
-            Err(e) => panic!("Failed to create wav file"),
+            Err(_) => panic!("Failed to create wav file"),
         };
         assert_eq!(wav_file.format.sample_rate, 44100);
         assert_eq!(wav_file.format.num_channels, 2);
         assert_eq!(wav_file.format.bits_per_sample, 16);
         assert_eq!(wav_file.format.block_align, 4);
         assert_eq!(wav_file.format.audio_format, 1);
+        assert_eq!(wav_file.data_section_size, 0x100);
         assert_eq!(
             wav_file.format.byte_rate,
             wav_file.format.sample_rate * wav_file.format.num_channels as u32 * 2
         );
+
+        assert_eq!(wav_file.bits_per_sample(), 16);
+        // 256 bytes per file(data_section_size) / 4 bytes per frame
+        assert_eq!(wav_file.num_frames(), 64);
     }
 }
