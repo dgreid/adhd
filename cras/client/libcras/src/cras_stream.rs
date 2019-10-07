@@ -5,6 +5,7 @@ use std::cmp::min;
 use std::io;
 use std::marker::PhantomData;
 use std::mem;
+use std::time::{Duration, Instant};
 use std::{error, fmt};
 
 use audio_streams::{
@@ -163,6 +164,10 @@ pub struct CrasStream<'a, T: CrasStreamData<'a> + BufferDrop> {
     /// The `PhantomData` is used by `controls: T`
     phantom: PhantomData<CrasAudioHeader<'a>>,
     audio_buffer: Option<CrasAudioBuffer>,
+    // Hacks for circ buffer.
+    next_frame: Duration,
+    start_time: Option<Instant>,
+    interval: Duration,
 }
 
 impl<'a, T: CrasStreamData<'a> + BufferDrop> CrasStream<'a, T> {
@@ -180,6 +185,7 @@ impl<'a, T: CrasStreamData<'a> + BufferDrop> CrasStream<'a, T> {
         format: snd_pcm_format_t,
         audio_sock: AudioSocket,
     ) -> Self {
+        let interval = Duration::from_millis(block_size as u64 * 1000 / rate as u64);
         Self {
             stream_id,
             server_socket,
@@ -191,6 +197,9 @@ impl<'a, T: CrasStreamData<'a> + BufferDrop> CrasStream<'a, T> {
             controls: T::new(audio_sock),
             phantom: PhantomData,
             audio_buffer: None,
+            next_frame: interval,
+            start_time: None,
+            interval,
         }
     }
 
@@ -207,13 +216,16 @@ impl<'a, T: CrasStreamData<'a> + BufferDrop> CrasStream<'a, T> {
     }
 
     fn wait_request_data(&mut self) -> Result<(), Error> {
-        match self.controls.audio_sock_mut().read_audio_message()? {
-            AudioMessage::Success { id, .. } => match id {
-                CRAS_AUDIO_MESSAGE_ID::AUDIO_MESSAGE_REQUEST_DATA => Ok(()),
-                _ => Err(Error::new(ErrorType::MessageTypeError)),
-            },
-            _ => Err(Error::new(ErrorType::MessageTypeError)),
+        if let Some(start_time) = self.start_time {
+            if start_time.elapsed() < self.next_frame {
+                std::thread::sleep(self.next_frame - start_time.elapsed());
+            }
+            self.next_frame += self.interval;
+        } else {
+            self.start_time = Some(Instant::now());
+            self.next_frame = self.interval;
         }
+        Ok(())
     }
 
     fn wait_data_ready(&mut self) -> Result<u32, Error> {
