@@ -8,4 +8,4 @@ edition = "2018"
 path = "src/cras_processing.rs"
 
 [dependencies]
-sample = { path = "/home/dgreid/third_party/sample" }
+sample = { path = "/home/dgreid/src/third_party/sample" }
