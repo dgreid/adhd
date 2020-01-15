@@ -8,7 +8,7 @@ use std::io::{BufWriter, Write};
 use sample::{signal, Frame, Sample, Signal};
 
 /// Write a stereo, 440Hz sine wave with a DC offset to the filename specified in the argument.
-fn main() -> std::result::Result<(), Box<std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
     let filename = args.get(1).unwrap_or_else(|| {

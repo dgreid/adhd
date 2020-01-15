@@ -12,7 +12,7 @@ use cras_processing::DspProcessable;
 
 /// Reads samples from the input, passed them through the dc blocking filter and writes to the
 /// output specified in argument 2.
-fn main() -> std::result::Result<(), Box<std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
     let input = args.get(1).unwrap_or_else(|| {
