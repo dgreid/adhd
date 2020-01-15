@@ -124,6 +124,7 @@ where
 ///
 /// We use f64 during the coefficients calculation for better accurary, but
 /// f32 is used during the actual filtering for faster computation.
+// TODO store the coefficients as floats.
 #[derive(Clone)]
 pub struct BiQuad<S>
 where
