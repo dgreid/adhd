@@ -226,8 +226,7 @@ pub trait DspProcessable {
     fn biquad(self, b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         // The following `unwrap` calls cannot fail because `from_samples` only returns `None` when
         // insufficient samples are provided, `repeat` provides infinite samples.
@@ -246,8 +245,7 @@ pub trait DspProcessable {
     fn low_pass<F>(self, cutoff_freq: F, resonance: F) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
         F: Frame<Sample = f64, NumChannels = <<Self as Signal>::Frame as Frame>::NumChannels>,
     {
         fn lowpass_params(cutoff: f64, resonance: f64) -> (f64, f64, f64) {
@@ -308,8 +306,7 @@ pub trait DspProcessable {
     fn high_pass(self, cutoff_freq: f64, resonance: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         match cutoff_freq {
             _f if _f >= 1.0 => {
@@ -347,8 +344,7 @@ pub trait DspProcessable {
     fn bandpass(self, freq: f64, q: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         if q <= 0.0 {
             // When Q = 0, the formulas have problems. If we look at the z-transform, we can
@@ -385,8 +381,7 @@ pub trait DspProcessable {
     fn low_shelf(self, freq: f64, db_gain: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         let a = 10.0_f64.powf(db_gain / 40.0);
 
@@ -424,8 +419,7 @@ pub trait DspProcessable {
     fn high_shelf(self, freq: f64, db_gain: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         let a = 10.0_f64.powf(db_gain / 40.0);
 
@@ -463,8 +457,7 @@ pub trait DspProcessable {
     fn peaking(self, freq: f64, q: f64, db_gain: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         let a = 10.0_f64.powf(db_gain / 40.0);
 
@@ -499,8 +492,7 @@ pub trait DspProcessable {
     fn notch(self, freq: f64, q: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         match freq {
             _f if _f <= 0.0 || _f >= 1.0 => {
@@ -533,8 +525,7 @@ pub trait DspProcessable {
     fn all_pass(self, freq: f64, q: f64) -> BiQuad<Self>
     where
         Self: Sized + Signal,
-        <<Self as sample::signal::Signal>::Frame as sample::frame::Frame>::Sample:
-            sample::conv::FromSample<f64>,
+        <<Self as Signal>::Frame as Frame>::Sample: FromSample<f64>,
     {
         match freq {
             _f if _f <= 0.0 || _f >= 1.0 => {
