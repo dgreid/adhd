@@ -151,9 +151,9 @@ Methods		void SetOutputVolume(int32 volume)
 		int32 IsAudioOutputActive()
 
 			Returns 1 if there are currently any active output streams,
-			excluding 'fake' streams that are not actually outputting any
+			excluding 'dummy' streams that are not actually outputting any
 			audio. Returns 0 if there are no active streams, or all active
-			streams are 'fake' streams.
+			streams are 'dummy' streams.
 
 		void SetGlobalOutputChannelRemix(int32 num_channels,
 						 array:double coefficient)

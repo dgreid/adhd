@@ -331,7 +331,7 @@ struct cras_iodev *loopback_iodev_create(enum CRAS_LOOPBACK_TYPE type)
 	if (iodev == NULL)
 		return NULL;
 
-	/* Create an empty ionode */
+	/* Create a dummy ionode */
 	node = (struct cras_ionode *)calloc(1, sizeof(*node));
 	node->dev = iodev;
 	node->type = node_type;
